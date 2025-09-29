@@ -37,3 +37,4 @@ Adeept is committed to assist customers in their education of robotics, programm
 ## Copyright
 
 Adeept brand and logo are copyright of Shenzhen Adeept Technology Co., Ltd. and cannot be used without written permission.
+- test Mon Sep 29 22:39:07 MSK 2025
