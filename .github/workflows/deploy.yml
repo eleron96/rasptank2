@@ -1,0 +1,32 @@
+name: Deploy to Raspberry Pi
+
+on:
+  push:
+    branches: [ master ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.PI_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.PI_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Deploy on Raspberry Pi
+        env:
+          PI_HOST: ${{ secrets.PI_HOST }}
+          PI_USER: ${{ secrets.PI_USER }}
+        run: |
+          ssh -o StrictHostKeyChecking=yes ${PI_USER}@${PI_HOST} <<'SSHCMDS'
+            set -euo pipefail
+            cd ~/rasptank2
+            git fetch --all -p
+            git reset --hard origin/master
+            sudo systemctl restart rasptank2.service
+            systemctl --no-pager -l status rasptank2.service | head -n 20
+          SSHCMDS
+
