@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Read battery voltage from ADS7830 (Robot HAT V3.1) and map to percentage."""
+import json
 import os
 import threading
 import time
+from pathlib import Path
 
 from math import isclose
 
@@ -12,6 +14,13 @@ try:
 except Exception:
     board = None
     busio = None
+
+try:
+    import adafruit_ads7830.ads7830 as _ads7830  # type: ignore
+    from adafruit_ads7830.analog_in import AnalogIn  # type: ignore
+except Exception:
+    _ads7830 = None  # type: ignore
+    AnalogIn = None  # type: ignore
 
 try:
     from smbus2 import SMBus  # type: ignore
@@ -25,7 +34,36 @@ ADS7830_ADDRESS = 0x48
 
 _MIN_VOLT = float(os.getenv("BATTERY_VOLT_MIN", "6.0"))
 _MAX_VOLT = float(os.getenv("BATTERY_VOLT_MAX", "8.4"))
-_CHANNEL = int(os.getenv("BATTERY_ADC_CHANNEL", "7"))
+_CHANNEL = int(os.getenv("BATTERY_ADC_CHANNEL", "0"))
+
+_CAL_FILE = Path(
+    os.getenv(
+        "BATTERY_CAL_FILE",
+        os.path.join(os.path.dirname(__file__), "battery_calibration.json"),
+    )
+)
+_VOLT_SCALE = float(os.getenv("BATTERY_VOLT_SCALE", str(_MAX_VOLT)))
+_CAL_FACTOR = float(os.getenv("BATTERY_CAL_FACTOR", "1.0"))
+_CAL_OFFSET = float(os.getenv("BATTERY_CAL_OFFSET", "0.0"))
+
+
+def _load_calibration() -> None:
+    global _VOLT_SCALE, _CAL_FACTOR, _CAL_OFFSET
+    if not _CAL_FILE.is_file():
+        return
+    try:
+        data = json.loads(_CAL_FILE.read_text())
+        if "scale" in data:
+            _VOLT_SCALE = float(data["scale"])
+        if "factor" in data:
+            _CAL_FACTOR = float(data["factor"])
+        if "offset" in data:
+            _CAL_OFFSET = float(data["offset"])
+    except Exception as exc:
+        print(f"Battery calibration load error: {exc}")
+
+
+_load_calibration()
 
 def _to_percentage(voltage: float) -> int:
     if isclose(_MAX_VOLT, _MIN_VOLT):
@@ -44,9 +82,32 @@ class BatteryMonitor(threading.Thread):
         self._running.set()
         self._bus = None
         self._use_smbus = False
+        self._adc = None
+        self._analog_channel = None
+        self._raw_full_scale = 65535.0
+        self._scale_base = _VOLT_SCALE
+        self._cal_factor = _CAL_FACTOR
+        self._cal_offset = _CAL_OFFSET
         self._setup()
 
     def _setup(self):
+        if _ads7830 and AnalogIn and board is not None:
+            try:
+                i2c = None
+                try:
+                    i2c = board.I2C()  # type: ignore[attr-defined]
+                except Exception:
+                    if busio:
+                        i2c = busio.I2C(board.SCL, board.SDA)  # type: ignore[attr-defined]
+                if i2c is not None:
+                    # Prefer Adafruit driver when available for higher-resolution readings
+                    self._adc = _ads7830.ADS7830(i2c, ADS7830_ADDRESS)
+                    self._analog_channel = AnalogIn(self._adc, _CHANNEL)
+                    return
+            except Exception:
+                self._adc = None
+                self._analog_channel = None
+
         if SMBus is not None:
             self._bus = SMBus(1)
             self._use_smbus = True
@@ -74,14 +135,52 @@ class BatteryMonitor(threading.Thread):
             return self._percentage
 
     def _read_channel(self) -> int:
+        if self._analog_channel is not None:
+            return self._analog_channel.value
         # ADS7830 command byte: 1 0 START A2 A1 A0 PD1 PD0
         cmd = 0x84 | ((_CHANNEL & 0x07) << 4)
-        return self._bus.read_byte_data(ADS7830_ADDRESS, cmd)
+        if self._bus is None:
+            raise RuntimeError("ADS7830 bus not initialized")
+        raw8 = self._bus.read_byte_data(ADS7830_ADDRESS, cmd)
+        return raw8 * 257
+
+    def _raw_to_voltage(self, raw: int, calibrated: bool = True) -> float:
+        base = (raw / self._raw_full_scale) * self._scale_base
+        if calibrated:
+            base = base * self._cal_factor + self._cal_offset
+        return base
+
+    def sample_voltage(self, calibrated: bool = True, samples: int = 1, delay: float = 0.0) -> float:
+        total = 0.0
+        count = 0
+        for _ in range(max(1, samples)):
+            raw = self._read_channel()
+            total += self._raw_to_voltage(raw, calibrated=calibrated)
+            count += 1
+            if delay:
+                time.sleep(delay)
+        return total / count
+
+    @property
+    def scale_base(self) -> float:
+        return self._scale_base
+
+    @property
+    def cal_factor(self) -> float:
+        return self._cal_factor
+
+    @property
+    def cal_offset(self) -> float:
+        return self._cal_offset
+
+    @property
+    def calibration_file(self) -> Path:
+        return _CAL_FILE
 
     def _update(self):
         raw = self._read_channel()
-        # Map 8-bit value (0-255) to voltage, using default full-scale 8.4V
-        voltage = (raw / 255.0) * _MAX_VOLT
+        voltage = self._raw_to_voltage(raw, calibrated=True)
+        voltage = round(voltage, 2)
         percentage = _to_percentage(voltage)
         with self._lock:
             self._voltage = voltage
@@ -97,3 +196,9 @@ class BatteryMonitor(threading.Thread):
 
     def stop(self):
         self._running.clear()
+
+    def close(self):
+        if self._use_smbus and self._bus is not None:
+            close = getattr(self._bus, "close", None)
+            if callable(close):
+                close()

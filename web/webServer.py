@@ -432,7 +432,7 @@ async def check_permit(websocket):
             await websocket.send(response_str)
 
 async def recv_msg(websocket):
-    global speed_set, modeSelect
+    global speed_set, modeSelect, battery
 
     while True: 
         response = {
@@ -462,7 +462,18 @@ async def recv_msg(websocket):
 
             if 'get_info' == data:
                 response['title'] = 'get_info'
-                response['data'] = [info.get_cpu_tempfunc(), info.get_cpu_use(), info.get_ram_info()]
+                cpu_temp = info.get_cpu_tempfunc()
+                cpu_use = info.get_cpu_use()
+                ram_info = info.get_ram_info()
+                voltage = 0.0
+                percentage = 0
+                if battery is not None:
+                    try:
+                        voltage = round(battery.read_voltage(), 2)
+                        percentage = battery.read_percentage()
+                    except Exception as exc:
+                        print(f"Battery read error: {exc}")
+                response['data'] = [cpu_temp, cpu_use, ram_info, voltage, percentage]
 
             if 'wsB' in data:
                 try:
