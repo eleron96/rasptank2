@@ -26,6 +26,7 @@ from pca9685_driver import _SMBusPCA9685, angle_to_us, announce_driver, us_to_ti
 _PCA9685_DEFAULT_ADDR = 0x5F
 _SERVO_RELAX = os.getenv("SERVO_RELAX", "1").strip().lower() in ("1", "true", "on", "yes")
 _DEFAULT_FREQUENCY = 50
+_PWM_LED_CHANNEL = int(os.getenv("PWM_LED_CHANNEL", "5"))  # dedicated LED channel (0-based)
 
 
 def get_default_i2c_address():
@@ -114,15 +115,20 @@ class ServoCtrl(threading.Thread):
                 i2c = busio.I2C(SCL, SDA)
                 pwm = AdafruitPCA9685(i2c, address=PCA9685_ADDRESS)
                 pwm.frequency = self._frequency
-                self._servo_channels = [
-                    adafruit_servo.Servo(
-                        pwm.channels[channel],
-                        min_pulse=self._servo_min_pulse_us,
-                        max_pulse=self._servo_max_pulse_us,
-                        actuation_range=180,
+                channels = []
+                for channel in range(servo_num):
+                    if channel == _PWM_LED_CHANNEL:
+                        channels.append(None)
+                        continue
+                    channels.append(
+                        adafruit_servo.Servo(
+                            pwm.channels[channel],
+                            min_pulse=self._servo_min_pulse_us,
+                            max_pulse=self._servo_max_pulse_us,
+                            actuation_range=180,
+                        )
                     )
-                    for channel in range(servo_num)
-                ]
+                self._servo_channels = channels
                 self.pwm_servo = pwm
                 self._use_fallback = False
                 announce_driver(self._driver_context, "adafruit")
@@ -141,7 +147,7 @@ class ServoCtrl(threading.Thread):
         self._use_fallback = True
         self._servo_channels = [None] * servo_num
         try:
-            self.pwm_servo = _SMBusPCA9685(address=PCA9685_ADDRESS, frequency=self._frequency)
+            self.pwm_servo = _SMBusPCA9685(addr=PCA9685_ADDRESS, freq=self._frequency)
         except RuntimeError as exc:
             raise RuntimeError("Unable to initialize PCA9685 using smbus fallback: %s" % exc) from exc
         announce_driver(self._driver_context, "smbus", reason)
@@ -151,9 +157,14 @@ class ServoCtrl(threading.Thread):
 
     def set_angle(self, ID, angle):
         self._ensure_driver()
+        if ID == _PWM_LED_CHANNEL:
+            return
         angle = max(self.ctrlRangeMin, min(self.ctrlRangeMax, angle))
         if not self._use_fallback:
-            self._servo_channels[ID].angle = angle
+            channel_obj = self._servo_channels[ID]
+            if channel_obj is None:
+                return
+            channel_obj.angle = angle
             return
         pulse_us = angle_to_us(angle, self._servo_min_pulse_us, self._servo_max_pulse_us)
         ticks = us_to_ticks(pulse_us, self._frequency)
@@ -178,11 +189,18 @@ class ServoCtrl(threading.Thread):
             channels = [ch]
         if self._use_fallback:
             for idx in channels:
+                if idx == _PWM_LED_CHANNEL:
+                    continue
                 self.pwm_servo.set_pwm(idx, 0, 0)
         else:
             for idx in channels:
+                if idx == _PWM_LED_CHANNEL:
+                    continue
                 try:
-                    self.pwm_servo.channels[idx].duty_cycle = 0
+                    channel_obj = self.pwm_servo.channels[idx]
+                    if channel_obj is None:
+                        continue
+                    channel_obj.duty_cycle = 0
                 except AttributeError:
                     self.pwm_servo.set_pwm(idx, 0, 0)
 
@@ -395,6 +413,8 @@ class ServoCtrl(threading.Thread):
             self.moveWiggle()
 
     def setPWM(self, ID, PWM_input):
+        if ID == _PWM_LED_CHANNEL:
+            return
         self.lastPos[ID] = PWM_input
         self.nowPos[ID] = PWM_input
         self.bufferPos[ID] = float(PWM_input)

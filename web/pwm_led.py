@@ -42,7 +42,7 @@ class _PwmLed:
                 reason = exc
         else:
             reason = Exception("Blinka unavailable")
-        self._pca = _SMBusPCA9685(address=0x5F, frequency=_FREQUENCY)
+        self._pca = _SMBusPCA9685(addr=0x5F, freq=_FREQUENCY)
         self._use_fallback = True
         announce_driver("led", "smbus", reason)
 

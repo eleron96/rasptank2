@@ -14,7 +14,9 @@ import RPIservo
 import functions
 import robotLight
 import switch
+import buzzer
 import pwm_led
+import battery_monitor
 import socket
 
 #websocket
@@ -78,6 +80,7 @@ thisPath = "/" + os.path.dirname(curpath)
 
 direction_command = 'no'
 turn_command = 'no'
+battery = None
 
 def log_servo_action(action):
     print(f"[Servo] {action}")
@@ -203,10 +206,12 @@ def switchCtrl(command_input, response):
     elif 'ledOn' == command_input:
         log_led_action('ledOn')
         pwm_led.turn_on()
+        buzzer.tick()
 
     elif 'ledOff' == command_input:
         log_led_action('ledOff')
         pwm_led.turn_off()
+        buzzer.tick()
 
 
 def robotCtrl(command_input, response):
@@ -214,11 +219,13 @@ def robotCtrl(command_input, response):
     if 'forward' == command_input:
         direction_command = 'forward'
         move.move(speed_set, 1, "mid")
+        buzzer.tick()
         print("1111")
     
     elif 'backward' == command_input:
         direction_command = 'backward'
         move.move(speed_set, -1, "no")
+        buzzer.tick()
 
     elif 'DS' in command_input:
         direction_command = 'no'
@@ -229,10 +236,12 @@ def robotCtrl(command_input, response):
     elif 'left' == command_input:
         turn_command = 'left'
         move.move(speed_set, 1, "left")
+        buzzer.tick()
 
     elif 'right' == command_input:
         turn_command = 'right'
         move.move(speed_set, 1, "right")
+        buzzer.tick()
 
 
     elif 'TS' in command_input:
@@ -273,9 +282,11 @@ def robotCtrl(command_input, response):
     elif 'grab' == command_input: # servo D
         log_servo_action('grab')
         G_sc.singleServo(3, 1, 2)
+        buzzer.double()
     elif 'loose' == command_input:
         log_servo_action('loose')
         G_sc.singleServo(3,-1, 2)
+        buzzer.double()
     elif 'GLstop' in command_input:
         log_servo_action('GLstop')
         G_sc.stopWiggle()
@@ -509,6 +520,11 @@ if __name__ == '__main__':
     global flask_app
     flask_app = app.webapp()
     flask_app.startthread()
+
+    battery = battery_monitor.BatteryMonitor()
+    battery.start()
+
+    buzzer.alert()
 
     try:
         # global WS2812
