@@ -10,6 +10,22 @@ Adeept RaspTank is an open source intelligent robotics product for artificial in
 [GitHub]: https://github.com/adeept/adeept_rasptank2/     
 
 
+## Docker Compose Deployment
+
+The project now ships with a two-container stack: the application (`rasptank2`) and an nginx reverse proxy that exposes everything on port 80 while tunnelling WebSocket traffic via `/ws`.
+
+1. Copy the repo to your Raspberry Pi (see `make sync`).
+2. Run `docker compose up -d --build` in the project root. The compose file automatically:
+   - builds the `rasptank2:latest` image,
+   - maps `/dev/i2c-1` and `/dev/gpiomem`,
+   - injects `PCA9685_ADDR`/`BLINKA_FORCE*`/`SERVO_RELAX` environment variables,
+   - enables an automatic camera backend (`CAMERA_BACKEND=auto`) that tries Picamera2 first and falls back to OpenCV `/dev/video0`,
+   - brings up nginx with the supplied `nginx.conf`.
+3. Open `http://<pi-ip>/` for the UI. The browser will connect to the WebSocket endpoint at `ws(s)://<pi-ip>/ws`.
+
+`make run`/`make restart` are thin wrappers around `docker compose` and handle both containers. Logs from servo arm/gripper actions are streamed to `docker compose logs`.
+
+
 ## Getting Support or Providing Advice
 
 Adeept provides free and responsive product and technical support, including but not limited to:   
@@ -37,4 +53,3 @@ Adeept is committed to assist customers in their education of robotics, programm
 ## Copyright
 
 Adeept brand and logo are copyright of Shenzhen Adeept Technology Co., Ltd. and cannot be used without written permission.
-- test Mon Sep 29 22:39:07 MSK 2025

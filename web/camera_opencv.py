@@ -13,9 +13,8 @@ import PID
 import time
 import threading
 import imutils
-import libcamera
-from picamera2 import Picamera2
-import io
+CAMERA_BACKEND = os.getenv("CAMERA_BACKEND", "auto").strip().lower()
+CAMERA_DEVICE = os.getenv("CAMERA_DEVICE", "/dev/video0")
 
 
 pid = PID.PID()
@@ -478,35 +477,80 @@ class Camera(BaseCamera):
     @staticmethod
     def frames():
         global ImgIsNone,hflip,vflip
-        picam2 = Picamera2() 
-        
-        preview_config = picam2.preview_configuration
-        preview_config.size = (640, 480)
-        preview_config.format = 'RGB888'  # 'XRGB8888', 'XBGR8888', 'RGB888', 'BGR888', 'YUV420'
-        # hflip = 0
-        # vflip = 0
-        preview_config.transform = libcamera.Transform(hflip=hflip, vflip=vflip)
-        preview_config.colour_space = libcamera.ColorSpace.Sycc()
-        preview_config.buffer_count = 4
-        preview_config.queue = True
-
-        if not picam2.is_open:
-            raise RuntimeError('Could not start camera.')
-
-        try:
-            picam2.start()
-        except Exception as e:
-            print(f"\033[38;5;1mError:\033[0m\n{e}")
-            print("\nPlease check whether the camera is connected well,  \
-                  and disable the \"legacy camera driver\" on raspi-config")
-
+        backend_choice = CAMERA_BACKEND or "picamera2"
         cvt = CVThread()
         cvt.start()
 
+        def stream_from_picamera2():
+            try:
+                from picamera2 import Picamera2
+                import libcamera
+            except Exception as exc:
+                raise RuntimeError(f"Picamera2 module unavailable: {exc}") from exc
+
+            picam2 = Picamera2()
+            config = picam2.create_preview_configuration(
+                main={"size": (640, 480), "format": "RGB888"},
+                transform=libcamera.Transform(hflip=hflip, vflip=vflip),
+            )
+            picam2.configure(config)
+            picam2.start()
+            print("Using Picamera2 backend for video stream.")
+
+            while True:
+                img = picam2.capture_array()
+                yield img
+
+        def stream_from_opencv():
+            # Allow numeric or explicit device path.
+            source = CAMERA_DEVICE
+            if isinstance(source, str) and source.isdigit():
+                source_to_use = int(source)
+            else:
+                source_to_use = source
+            cap = cv2.VideoCapture(source_to_use)
+            if not cap.isOpened():
+                raise RuntimeError(f"Unable to open camera device {source_to_use}")
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+            print(f"Using OpenCV backend for video stream on {source_to_use}.")
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    time.sleep(0.05)
+                    continue
+                yield frame
+
+        generators = []
+        if backend_choice in ("picamera2", "auto"):
+            try:
+                generators.append(("picamera2", stream_from_picamera2()))
+            except Exception as exc:
+                print(f"Picamera2 backend failed: {exc}")
+                if backend_choice == "picamera2":
+                    raise
+        if backend_choice in ("opencv", "auto") or not generators:
+            generators.append(("opencv", stream_from_opencv()))
+
+        if not generators:
+            raise RuntimeError("No usable camera backend found (Picamera2/OpenCV).")
+
+        active_name, active_gen = generators[0]
+
         while True:
+            try:
+                img = next(active_gen)
+            except StopIteration:
+                raise RuntimeError(f"Camera backend {active_name} exhausted")
+            except Exception as exc:
+                print(f"Camera backend {active_name} failed: {exc}")
+                generators.pop(0)
+                if not generators:
+                    raise
+                active_name, active_gen = generators[0]
+                continue
             start_time = time.time()
-            # read current frame
-            img = picam2.capture_array()
 
             if img is None:
                 if ImgIsNone == 0:

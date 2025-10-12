@@ -14,6 +14,7 @@ import RPIservo
 import functions
 import robotLight
 import switch
+import pwm_led
 import socket
 
 #websocket
@@ -37,18 +38,26 @@ scGear.moveInit()
 
 P_sc = RPIservo.ServoCtrl()
 P_sc.start()
+P_sc.set_direction(2, -1)
 
 T_sc = RPIservo.ServoCtrl()
 T_sc.start()
 
 H1_sc = RPIservo.ServoCtrl()
 H1_sc.start()
+H1_sc.set_direction(0, -1)
 
 H2_sc = RPIservo.ServoCtrl()
 H2_sc.start()
 
 G_sc = RPIservo.ServoCtrl()
 G_sc.start()
+G_sc.set_direction(3, -1)
+
+def _clamp_speed(value, minimum=1, maximum=10):
+    return max(minimum, min(maximum, value))
+
+ARM_SERVO_SPEED = _clamp_speed(int(os.getenv("ARM_SERVO_SPEED", "10")))
 
 
 # modeSelect = 'none'
@@ -69,6 +78,12 @@ thisPath = "/" + os.path.dirname(curpath)
 
 direction_command = 'no'
 turn_command = 'no'
+
+def log_servo_action(action):
+    print(f"[Servo] {action}")
+
+def log_led_action(action):
+    print(f"[LED] {action}")
 
 def servoPosInit():
     scGear.initConfig(0,init_pwm0,1)
@@ -178,10 +193,20 @@ def switchCtrl(command_input, response):
         switch.switch(2,0)
 
     elif 'Switch_3_on' in command_input:
+        log_led_action('Switch_3_on')
         switch.switch(3,1)
 
     elif 'Switch_3_off' in command_input:
+        log_led_action('Switch_3_off')
         switch.switch(3,0) 
+
+    elif 'ledOn' == command_input:
+        log_led_action('ledOn')
+        pwm_led.turn_on()
+
+    elif 'ledOff' == command_input:
+        log_led_action('ledOff')
+        pwm_led.turn_off()
 
 
 def robotCtrl(command_input, response):
@@ -216,43 +241,59 @@ def robotCtrl(command_input, response):
             move.motorStop()
 
     elif 'armUp' == command_input: #servo A
-        H1_sc.singleServo(0, 1, 2)
+        log_servo_action('armUp')
+        H1_sc.singleServo(0, -1, ARM_SERVO_SPEED)
     elif 'armDown' == command_input:
-        H1_sc.singleServo(0,-1, 2)
+        log_servo_action('armDown')
+        H1_sc.singleServo(0, 1, ARM_SERVO_SPEED)
     elif 'armStop' in command_input:
+        log_servo_action('armStop')
         H1_sc.stopWiggle()
 
     elif 'handUp' == command_input: # servo B
+        log_servo_action('handUp')
         H2_sc.singleServo(1, -1, 2)
     elif 'handDown' == command_input:
+        log_servo_action('handDown')
         H2_sc.singleServo(1,1, 2)
     elif 'handStop' in command_input:
+        log_servo_action('handStop')
         H2_sc.stopWiggle()
 
     elif 'lookleft' == command_input: # servo C
+        log_servo_action('lookleft')
         P_sc.singleServo(2, 1, 2)
     elif 'lookright' == command_input:
+        log_servo_action('lookright')
         P_sc.singleServo(2,-1, 2)
     elif 'LRstop' in command_input:
+        log_servo_action('LRstop')
         P_sc.stopWiggle()
 
     elif 'grab' == command_input: # servo D
+        log_servo_action('grab')
         G_sc.singleServo(3, 1, 2)
     elif 'loose' == command_input:
+        log_servo_action('loose')
         G_sc.singleServo(3,-1, 2)
     elif 'GLstop' in command_input:
+        log_servo_action('GLstop')
         G_sc.stopWiggle()
 
     elif 'up' == command_input: # camera
+        log_servo_action('up')
         T_sc.singleServo(4, -1, 1)
     elif 'down' == command_input:
+        log_servo_action('down')
         T_sc.singleServo(4,1, 1)
     elif 'UDstop' in command_input:
+        log_servo_action('UDstop')
         T_sc.stopWiggle()
 
 
 
     elif 'home' == command_input:
+        log_servo_action('home')
         H1_sc.moveServoInit(0)
         H2_sc.moveServoInit(1)
         P_sc.moveServoInit(2)
