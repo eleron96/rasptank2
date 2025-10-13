@@ -6,6 +6,8 @@
 
 import time
 import threading
+from concurrent.futures import ThreadPoolExecutor
+import logging
 import move
 import os
 import info
@@ -17,6 +19,7 @@ import switch
 import buzzer
 import pwm_led
 import battery_monitor
+import servo_calibration
 import socket
 
 #websocket
@@ -34,6 +37,13 @@ speed_set = 100
 rad = 0.5
 turnWiggle = 60
 
+SHOULDER_SERVO_CHANNEL = 0
+SHOULDER_DRIVE_SPEED = 2
+
+logger = logging.getLogger("rasptank")
+
+_COMMAND_EXECUTOR = ThreadPoolExecutor(max_workers=1)
+
 scGear = RPIservo.ServoCtrl()
 # scGear.setup()
 scGear.moveInit()
@@ -48,6 +58,7 @@ T_sc.start()
 H1_sc = RPIservo.ServoCtrl()
 H1_sc.start()
 H1_sc.set_direction(0, -1)
+H1_sc.set_relax_enabled(SHOULDER_SERVO_CHANNEL, False)
 
 H2_sc = RPIservo.ServoCtrl()
 H2_sc.start()
@@ -60,6 +71,50 @@ def _clamp_speed(value, minimum=1, maximum=10):
     return max(minimum, min(maximum, value))
 
 ARM_SERVO_SPEED = _clamp_speed(int(os.getenv("ARM_SERVO_SPEED", "10")))
+
+
+def _clamp_angle(value, minimum=0, maximum=180):
+    return max(minimum, min(maximum, value))
+
+
+_shoulder_calibration = {
+    "base_angle": 90.0,
+    "raise_angle": 45.0,
+}
+
+
+def _apply_shoulder_calibration(calibration):
+    global _shoulder_calibration
+    if not isinstance(calibration, dict):
+        return
+    base = _clamp_angle(float(calibration.get("base_angle", 90.0)))
+    raise_angle = _clamp_angle(float(calibration.get("raise_angle", 45.0)))
+    max_angle = max(0.0, min(180.0, base + raise_angle))
+    min_angle = max(0.0, min(180.0, base))
+    if max_angle < min_angle:
+        max_angle = min_angle
+    _shoulder_calibration = {
+        "base_angle": base,
+        "raise_angle": raise_angle,
+    }
+
+    try:
+        target = int(round(base))
+        H1_sc.initConfig(SHOULDER_SERVO_CHANNEL, target, 1)
+        H1_sc.maxPos[SHOULDER_SERVO_CHANNEL] = int(round(max_angle))
+        H1_sc.minPos[SHOULDER_SERVO_CHANNEL] = int(round(min_angle))
+        H1_sc.goalPos[SHOULDER_SERVO_CHANNEL] = target
+        H1_sc.nowPos[SHOULDER_SERVO_CHANNEL] = target
+        H1_sc.lastPos[SHOULDER_SERVO_CHANNEL] = target
+        H1_sc.bufferPos[SHOULDER_SERVO_CHANNEL] = float(target)
+        H1_sc.stopWiggle()
+        _log_shoulder_state("shoulder_calibrated", target=target)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error({"evt": "shoulder_calibration_error", "error": str(exc)})
+
+
+servo_calibration.register_shoulder_observer(_apply_shoulder_calibration)
+_apply_shoulder_calibration(servo_calibration.get_shoulder_calibration())
 
 
 # modeSelect = 'none'
@@ -82,11 +137,15 @@ direction_command = 'no'
 turn_command = 'no'
 battery = None
 
-def log_servo_action(action):
-    print(f"[Servo] {action}")
+def log_servo_action(action, **extra):
+    payload = {"evt": "servo_action", "action": action}
+    payload.update(extra)
+    logger.info(payload)
 
-def log_led_action(action):
-    print(f"[LED] {action}")
+def log_led_action(action, **extra):
+    payload = {"evt": "led_action", "action": action}
+    payload.update(extra)
+    logger.info(payload)
 
 def servoPosInit():
     scGear.initConfig(0,init_pwm0,1)
@@ -220,7 +279,7 @@ def robotCtrl(command_input, response):
         direction_command = 'forward'
         move.move(speed_set, 1, "mid")
         buzzer.tick()
-        print("1111")
+        logger.debug({"evt": "drive_debug", "note": "forward command tick"})
     
     elif 'backward' == command_input:
         direction_command = 'backward'
@@ -251,13 +310,16 @@ def robotCtrl(command_input, response):
 
     elif 'armUp' == command_input: #servo A
         log_servo_action('armUp')
-        H1_sc.singleServo(0, -1, ARM_SERVO_SPEED)
+        H1_sc.singleServo(SHOULDER_SERVO_CHANNEL, -1, SHOULDER_DRIVE_SPEED)
+        _log_shoulder_state("shoulder_cmd", direction="up")
     elif 'armDown' == command_input:
         log_servo_action('armDown')
-        H1_sc.singleServo(0, 1, ARM_SERVO_SPEED)
+        H1_sc.singleServo(SHOULDER_SERVO_CHANNEL, 1, SHOULDER_DRIVE_SPEED)
+        _log_shoulder_state("shoulder_cmd", direction="down")
     elif 'armStop' in command_input:
         log_servo_action('armStop')
         H1_sc.stopWiggle()
+        _log_shoulder_state("shoulder_cmd", direction="stop")
 
     elif 'handUp' == command_input: # servo B
         log_servo_action('handUp')
@@ -310,7 +372,7 @@ def robotCtrl(command_input, response):
         P_sc.moveServoInit(2)
         G_sc.moveServoInit(3)
         T_sc.moveServoInit(4)
-        print("11")
+        logger.debug({"evt": "servo_home"})
 
 
 def configPWM(command_input, response):
@@ -376,7 +438,7 @@ def configPWM(command_input, response):
 
 
     if 'PWMINIT' == command_input:
-        print(init_pwm1)
+        logger.debug({"evt": "pwm_init_readback", "value": init_pwm1})
         servoPosInit()
 
     elif 'PWMD' == command_input:
@@ -391,17 +453,58 @@ def configPWM(command_input, response):
         replace_num('init_pwm2 = ', 90)
 
 
+def _process_hardware_command(command_input: str) -> None:
+    try:
+        logger.info({"evt": "command_queue", "cmd": command_input})
+        robotCtrl(command_input, None)
+        switchCtrl(command_input, None)
+        functionSelect(command_input, None)
+        configPWM(command_input, None)
+    except Exception as exc:
+        logger.error({"evt": "command_queue_error", "cmd": command_input, "error": str(exc)})
+
+
+def _dispatch_hardware_command(command_input: str) -> None:
+    _COMMAND_EXECUTOR.submit(_process_hardware_command, command_input)
+
+
+def _log_shoulder_state(event: str, **extra) -> None:
+    try:
+        now_pos = H1_sc.nowPos[SHOULDER_SERVO_CHANNEL]
+        goal_pos = H1_sc.goalPos[SHOULDER_SERVO_CHANNEL]
+        speed = H1_sc.scSpeed[SHOULDER_SERVO_CHANNEL]
+    except Exception:
+        now_pos = goal_pos = speed = None
+    telemetry = {
+        "evt": event,
+        "servo": "shoulder",
+        "channel": SHOULDER_SERVO_CHANNEL,
+        "now": now_pos,
+        "goal": goal_pos,
+        "speed": speed,
+        "calibration": dict(_shoulder_calibration),
+    }
+    if battery is not None:
+        try:
+            telemetry["vbat"] = round(battery.read_voltage(), 2)
+            telemetry["vbat_pct"] = battery.read_percentage()
+        except Exception as exc:
+            telemetry["vbat_error"] = str(exc)
+    telemetry.update(extra)
+    logger.info(telemetry)
+
+
 def update_code():
     # Update local to be consistent with remote
     projectPath = thisPath[:-7]
     with open(f'{projectPath}/config.json', 'r') as f1:
         config = json.load(f1)
         if not config['production']:
-            print('Update code')
+            logger.info({"evt": "update_code", "status": "starting"})
             # Force overwriting local code
             if os.system(f'cd {projectPath} && sudo git fetch --all && sudo git reset --hard origin/master && sudo git pull') == 0:
-                print('Update successfully')
-                print('Restarting...')
+                logger.info({"evt": "update_code", "status": "completed"})
+                logger.info({"evt": "system", "action": "reboot"})
                 os.system('sudo reboot')
             
 def wifi_check():
@@ -410,7 +513,7 @@ def wifi_check():
         s.connect(("1.1.1.1",80))
         ipaddr_check=s.getsockname()[0]
         s.close()
-        print(ipaddr_check)
+        logger.info({"evt": "network_ip", "ip": ipaddr_check})
     except:
         ap_threading=threading.Thread(target=ap_thread)   #Define a thread for data receiving
         ap_threading.setDaemon(True)                          #'True' means it is a front thread,it would close when the mainloop() closes
@@ -446,21 +549,15 @@ async def recv_msg(websocket):
         try:
             data = json.loads(data)
         except Exception as e:
-            print('not A JSON')
+            logger.debug({"evt": "ws_parse_failed", "raw": data})
 
         if not data:
             continue
 
         if isinstance(data,str):
-            robotCtrl(data, response)
+            handled_locally = False
 
-            switchCtrl(data, response)
-
-            functionSelect(data, response)
-
-            configPWM(data, response)
-
-            if 'get_info' == data:
+            if data == 'get_info':
                 response['title'] = 'get_info'
                 cpu_temp = info.get_cpu_tempfunc()
                 cpu_use = info.get_cpu_use()
@@ -472,35 +569,58 @@ async def recv_msg(websocket):
                         voltage = round(battery.read_voltage(), 2)
                         percentage = battery.read_percentage()
                     except Exception as exc:
-                        print(f"Battery read error: {exc}")
+                        logger.warning({"evt": "battery_read_error", "error": str(exc)})
                 response['data'] = [cpu_temp, cpu_use, ram_info, voltage, percentage]
+                handled_locally = True
 
-            if 'wsB' in data:
+            elif data.startswith('wsB'):
                 try:
-                    set_B=data.split()
+                    set_B = data.split()
                     speed_set = int(set_B[1])
-                except:
-                    pass
+                except Exception:
+                    logger.debug({"evt": "speed_set_parse_failed", "raw": data})
+                handled_locally = True
 
-            #CVFL
-            elif 'CVFL' == data:
+            # CVFL commands are lightweight camera tweaks; keep them inline.
+            elif data == 'CVFL':
                 flask_app.modeselect('findlineCV')
+                handled_locally = True
 
-            elif 'CVFLColorSet' in data:
-                color = int(data.split()[1])
-                flask_app.camera.colorSet(color)
+            elif data.startswith('CVFLColorSet'):
+                try:
+                    color = int(data.split()[1])
+                    flask_app.camera.colorSet(color)
+                except Exception as exc:
+                    logger.warning({"evt": "cvfl_color_error", "error": str(exc)})
+                handled_locally = True
 
-            elif 'CVFLL1' in data:
-                pos = int(data.split()[1])
-                flask_app.camera.linePosSet_1(pos)
+            elif data.startswith('CVFLL1'):
+                try:
+                    pos = int(data.split()[1])
+                    flask_app.camera.linePosSet_1(pos)
+                except Exception as exc:
+                    logger.warning({"evt": "cvfl_line1_error", "error": str(exc)})
+                handled_locally = True
 
-            elif 'CVFLL2' in data:
-                pos = int(data.split()[1])
-                flask_app.camera.linePosSet_2(pos)
+            elif data.startswith('CVFLL2'):
+                try:
+                    pos = int(data.split()[1])
+                    flask_app.camera.linePosSet_2(pos)
+                except Exception as exc:
+                    logger.warning({"evt": "cvfl_line2_error", "error": str(exc)})
+                handled_locally = True
 
-            elif 'CVFLSP' in data:
-                err = int(data.split()[1])
-                flask_app.camera.errorSet(err)
+            elif data.startswith('CVFLSP'):
+                try:
+                    err = int(data.split()[1])
+                    flask_app.camera.errorSet(err)
+                except Exception as exc:
+                    logger.warning({"evt": "cvfl_err_error", "error": str(exc)})
+                handled_locally = True
+
+            if not handled_locally and data:
+                _dispatch_hardware_command(data)
+                response['status'] = 'queued'
 
 
         elif(isinstance(data,dict)):
@@ -508,7 +628,7 @@ async def recv_msg(websocket):
                 color = data['data']
                 flask_app.colorFindSet(color[0],color[1],color[2])
 
-        print(data)
+        logger.debug({"evt": "ws_command_processed", "payload": data})
         response = json.dumps(response)
         await websocket.send(response)
 
@@ -517,6 +637,13 @@ async def main_logic(websocket, path):
     await recv_msg(websocket)
 
 if __name__ == '__main__':
+    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+    logging.basicConfig(
+        level=getattr(logging, log_level, logging.INFO),
+        format='%(asctime)s %(levelname)s %(message)s',
+    )
+    logger.info({"evt": "startup", "component": "webServer", "log_level": log_level})
+
     switch.switchSetup()
     switch.set_all_switch_off()
     
@@ -541,16 +668,16 @@ if __name__ == '__main__':
         # global WS2812
         robotlight_check = robotLight.check_rpi_model()
         if robotlight_check == 5:
-            print("\033[1;33m WS2812 officially does not support Raspberry Pi 5 for the time being, and the WS2812 LED cannot be used on Raspberry Pi 5.\033[0m")
+            logger.warning({"evt": "ws2812_unsupported_pi5"})
             WS2812_mark = 0 # WS2812 not compatible
         else:
-            print("WS2812 success!")
+            logger.info({"evt": "ws2812_init", "status": "ok"})
             WS2812_mark = 1
             WS2812=robotLight.RobotWS2812()
             WS2812.start()
             WS2812.breath(70,70,255)
-    except:
-        print('Use "sudo pip3 install rpi_ws281x" to install WS_281x package\n using "sudo pip3 install rpi_ws281x" install rpi_ws281x')
+    except Exception as exc:
+        logger.warning({"evt": "ws2812_missing_dependency", "hint": "pip install rpi_ws281x", "error": str(exc)})
         pass
 
     while  1:
@@ -558,11 +685,11 @@ if __name__ == '__main__':
         try:                  #Start server,waiting for client
             start_server = websockets.serve(main_logic, '0.0.0.0', 8888)
             asyncio.get_event_loop().run_until_complete(start_server)
-            print('waiting for connection...')
+            logger.info({"evt": "ws_server", "status": "waiting"})
             # print('...connected from :', addr)
             break
         except Exception as e:
-            print(e)
+            logger.error({"evt": "ws_server_error", "error": str(e)})
             if WS2812_mark:
                 WS2812.setColor(0,0,0)
             else:
@@ -578,7 +705,7 @@ if __name__ == '__main__':
     try:
         asyncio.get_event_loop().run_forever()
     except Exception as e:
-        print(e)
+        logger.error({"evt": "ws_loop_error", "error": str(e)})
         if WS2812_mark:
             WS2812.setColor(0,0,0)
         else:

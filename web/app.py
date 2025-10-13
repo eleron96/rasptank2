@@ -1,12 +1,18 @@
 #!/usr/bin/env python
 from importlib import import_module
+import json
+import hashlib
 import os
-from flask import Flask, render_template, Response, send_from_directory
+from flask import Flask, Response, send_from_directory, jsonify, request
 from flask_cors import *
 # import camera driver
 
 from camera_opencv import Camera
 import threading
+
+import battery_monitor
+import servo_calibration
+from events import event_bus
 
 # Raspberry Pi camera module (requires picamera package)
 # from camera_pi import Camera
@@ -14,6 +20,21 @@ import threading
 app = Flask(__name__)
 CORS(app, supports_credentials=True)
 camera = Camera()
+
+
+def _calibration_snapshot():
+    status = battery_monitor.sample_status()
+    cal = battery_monitor.get_calibration()
+    return {
+        "calibration": cal,
+        "voltage": round(status.get("voltage", 0.0) or 0.0, 3),
+        "raw_voltage": round(status.get("raw_voltage", 0.0) or 0.0, 3),
+    }
+
+
+def _calibration_etag(payload: dict) -> str:
+    data = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha1(data).hexdigest()
 
 def gen(camera):
     """Video streaming generator function."""
@@ -27,6 +48,110 @@ def video_feed():
     """Video streaming route. Put this in the src attribute of an img tag."""
     return Response(gen(camera),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/api/calibration', methods=['GET', 'POST'])
+def calibration_api():
+    if request.method == 'GET':
+        snapshot = _calibration_snapshot()
+        etag = _calibration_etag(snapshot)
+        if request.headers.get("If-None-Match") == etag:
+            resp = Response(status=304)
+            resp.set_etag(etag)
+            return resp
+        resp = jsonify(snapshot)
+        resp.set_etag(etag)
+        return resp
+
+    payload = request.get_json(force=True) or {}
+    try:
+        actual_voltage = float(payload.get("voltage", 0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid voltage value"}), 400
+
+    if actual_voltage <= 0:
+        return jsonify({"error": "Voltage must be greater than zero"}), 400
+
+    try:
+        result = battery_monitor.calibrate_to_voltage(actual_voltage)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+    status = battery_monitor.sample_status()
+    response = {
+        "success": True,
+        "calibration": {
+            "scale": result.get("scale"),
+            "factor": result.get("factor"),
+            "offset": result.get("offset"),
+        },
+        "actual_voltage": result.get("actual_voltage"),
+        "raw_sample": result.get("raw_voltage"),
+        "voltage": round(status.get("voltage", 0.0) or 0.0, 3),
+        "raw_voltage": round(status.get("raw_voltage", 0.0) or 0.0, 3),
+    }
+    payload_for_etag = {
+        "calibration": response["calibration"],
+        "voltage": response["voltage"],
+        "raw_voltage": response["raw_voltage"],
+    }
+    etag = _calibration_etag(payload_for_etag)
+    flask_response = jsonify(response)
+    flask_response.set_etag(etag)
+    event_bus.publish("battery_status", {"voltage": response["voltage"], "raw_voltage": response["raw_voltage"]})
+    event_bus.publish("battery_calibration", response["calibration"])
+    return flask_response
+
+
+@app.route('/api/servo/shoulder', methods=['GET', 'POST'])
+def shoulder_servo_calibration():
+    if request.method == 'GET':
+        data = servo_calibration.get_shoulder_calibration()
+        return jsonify({"calibration": data})
+
+    payload = request.get_json(force=True) or {}
+    try:
+        base_angle = float(payload.get("base_angle", 0))
+        raise_angle = float(payload.get("raise_angle", 0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Angles must be numeric."}), 400
+
+    try:
+        result = servo_calibration.update_shoulder_calibration(
+            base_angle=base_angle,
+            raise_angle=raise_angle,
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:  # pragma: no cover - defensive
+        return jsonify({"error": str(exc)}), 500
+
+    event_bus.publish("shoulder_calibration", result)
+    return jsonify({"success": True, "calibration": result})
+
+
+@app.route('/api/events')
+def sse_events():
+    """Server-sent events stream for UI updates."""
+    def stream():
+        queue = event_bus.listen()
+        queue.put({
+            "type": "shoulder_calibration",
+            "payload": servo_calibration.get_shoulder_calibration(),
+        })
+        queue.put({
+            "type": "battery_status",
+            "payload": battery_monitor.sample_status(),
+        })
+        try:
+            while True:
+                message = queue.get()
+                event_type = message.get("type", "message")
+                payload = message.get("payload", {})
+                yield f"event: {event_type}\ndata: {json.dumps(payload)}\n\n"
+        except GeneratorExit:
+            event_bus.remove(queue)
+
+    return Response(stream(), mimetype='text/event-stream')
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
 

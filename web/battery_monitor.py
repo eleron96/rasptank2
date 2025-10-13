@@ -4,7 +4,9 @@ import json
 import os
 import threading
 import time
+import weakref
 from pathlib import Path
+import logging
 
 from math import isclose
 
@@ -46,10 +48,30 @@ _VOLT_SCALE = float(os.getenv("BATTERY_VOLT_SCALE", str(_MAX_VOLT)))
 _CAL_FACTOR = float(os.getenv("BATTERY_CAL_FACTOR", "1.0"))
 _CAL_OFFSET = float(os.getenv("BATTERY_CAL_OFFSET", "0.0"))
 
+_DEFAULT_CAL = {"scale": _VOLT_SCALE, "factor": _CAL_FACTOR, "offset": _CAL_OFFSET}
+_CAL_LOCK = threading.Lock()
+# Track live monitor instances so calibration changes propagate immediately.
+_ACTIVE_MONITORS = weakref.WeakSet()
+try:
+    from events import event_bus
+except Exception:
+    event_bus = None
+
+logger = logging.getLogger("rasptank")
+
+
+def _save_calibration(data: dict) -> None:
+    try:
+        with _CAL_LOCK:
+            _CAL_FILE.write_text(json.dumps(data, indent=2))
+    except Exception as exc:
+        logger.error({"evt": "battery_calibration_save_error", "error": str(exc)})
+
 
 def _load_calibration() -> None:
     global _VOLT_SCALE, _CAL_FACTOR, _CAL_OFFSET
     if not _CAL_FILE.is_file():
+        _save_calibration(_DEFAULT_CAL)
         return
     try:
         data = json.loads(_CAL_FILE.read_text())
@@ -60,10 +82,81 @@ def _load_calibration() -> None:
         if "offset" in data:
             _CAL_OFFSET = float(data["offset"])
     except Exception as exc:
-        print(f"Battery calibration load error: {exc}")
+        logger.error({"evt": "battery_calibration_load_error", "error": str(exc)})
 
 
 _load_calibration()
+
+
+def get_calibration() -> dict:
+    return {
+        "scale": _VOLT_SCALE,
+        "factor": _CAL_FACTOR,
+        "offset": _CAL_OFFSET,
+    }
+
+
+def _apply_calibration_to_all(scale: float, factor: float, offset: float) -> dict:
+    global _VOLT_SCALE, _CAL_FACTOR, _CAL_OFFSET
+    _VOLT_SCALE = float(scale)
+    _CAL_FACTOR = float(factor)
+    _CAL_OFFSET = float(offset)
+    data = get_calibration()
+    _save_calibration(data)
+    for monitor in list(_ACTIVE_MONITORS):
+        try:
+            monitor.update_calibration(_VOLT_SCALE, _CAL_FACTOR, _CAL_OFFSET)
+        except Exception as exc:
+            logger.warning({"evt": "battery_monitor_update_error", "error": str(exc)})
+    return data
+
+
+def _get_active_monitor():
+    for monitor in list(_ACTIVE_MONITORS):
+        return monitor
+    return None
+
+
+def sample_status(samples: int = 5, delay: float = 0.05) -> dict:
+    monitor = _get_active_monitor()
+    created = False
+    if monitor is None:
+        monitor = BatteryMonitor(interval=0.0)
+        created = True
+    try:
+        raw = monitor.sample_voltage(calibrated=False, samples=samples, delay=delay)
+        calibrated = monitor.sample_voltage(calibrated=True, samples=samples, delay=delay)
+        return {
+            "raw_voltage": raw,
+            "voltage": calibrated,
+        }
+    finally:
+        if created:
+            monitor.close()
+
+
+def calibrate_to_voltage(actual_voltage: float, samples: int = 20, delay: float = 0.05) -> dict:
+    if actual_voltage <= 0:
+        raise ValueError("actual_voltage must be positive")
+    monitor = _get_active_monitor()
+    created = False
+    if monitor is None:
+        monitor = BatteryMonitor(interval=0.0)
+        created = True
+    try:
+        raw = monitor.sample_voltage(calibrated=False, samples=samples, delay=delay)
+        if raw <= 0:
+            raise RuntimeError("Unable to read battery voltage for calibration")
+        factor = actual_voltage / raw
+        data = _apply_calibration_to_all(monitor.scale_base, factor, monitor.cal_offset)
+        data.update({"actual_voltage": actual_voltage, "raw_voltage": raw})
+        if event_bus:
+            event_bus.publish("battery_calibration", data.copy())
+        return data
+    finally:
+        if created:
+            monitor.close()
+
 
 def _to_percentage(voltage: float) -> int:
     if isclose(_MAX_VOLT, _MIN_VOLT):
@@ -88,7 +181,9 @@ class BatteryMonitor(threading.Thread):
         self._scale_base = _VOLT_SCALE
         self._cal_factor = _CAL_FACTOR
         self._cal_offset = _CAL_OFFSET
+        self._last_raw = 0.0
         self._setup()
+        _ACTIVE_MONITORS.add(self)
 
     def _setup(self):
         if _ads7830 and AnalogIn and board is not None:
@@ -161,6 +256,12 @@ class BatteryMonitor(threading.Thread):
                 time.sleep(delay)
         return total / count
 
+    def update_calibration(self, scale: float, factor: float, offset: float) -> None:
+        with self._lock:
+            self._scale_base = float(scale)
+            self._cal_factor = float(factor)
+            self._cal_offset = float(offset)
+
     @property
     def scale_base(self) -> float:
         return self._scale_base
@@ -181,24 +282,44 @@ class BatteryMonitor(threading.Thread):
         raw = self._read_channel()
         voltage = self._raw_to_voltage(raw, calibrated=True)
         voltage = round(voltage, 2)
+        raw_voltage = round(self._raw_to_voltage(raw, calibrated=False), 2)
         percentage = _to_percentage(voltage)
+        changed = False
         with self._lock:
+            if (
+                not isclose(self._voltage, voltage, abs_tol=0.01)
+                or not isclose(getattr(self, "_last_raw", raw_voltage), raw_voltage, abs_tol=0.01)
+                or self._percentage != percentage
+            ):
+                changed = True
             self._voltage = voltage
             self._percentage = percentage
+            self._last_raw = raw_voltage
+        if changed and event_bus:
+            event_bus.publish(
+                "battery_status",
+                {
+                    "voltage": voltage,
+                    "raw_voltage": raw_voltage,
+                    "percentage": percentage,
+                },
+            )
 
     def run(self):
         while self._running.is_set():
             try:
                 self._update()
             except Exception as exc:
-                print(f"BatteryMonitor error: {exc}")
+                logger.error({"evt": "battery_monitor_error", "error": str(exc)})
             time.sleep(self._interval)
 
     def stop(self):
         self._running.clear()
+        _ACTIVE_MONITORS.discard(self)
 
     def close(self):
         if self._use_smbus and self._bus is not None:
             close = getattr(self._bus, "close", None)
             if callable(close):
                 close()
+        _ACTIVE_MONITORS.discard(self)

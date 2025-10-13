@@ -70,6 +70,7 @@ class ServoCtrl(threading.Thread):
         self._servo_max_pulse_us = 2400
         self._use_fallback = False
         self._servo_channels = []
+        self._no_relax_channels = set()
 
         # Defer I2C setup until the first command so imports in Docker on BCM2712 do not crash.
         self.pwm_servo = None
@@ -152,6 +153,15 @@ class ServoCtrl(threading.Thread):
             raise RuntimeError("Unable to initialize PCA9685 using smbus fallback: %s" % exc) from exc
         announce_driver(self._driver_context, "smbus", reason)
 
+    def set_relax_enabled(self, channel, enabled=True):
+        """Enable or disable automatic relax for a specific channel."""
+        if channel == _PWM_LED_CHANNEL:
+            return
+        if enabled:
+            self._no_relax_channels.discard(channel)
+        else:
+            self._no_relax_channels.add(channel)
+
     def _release_channel(self, channel):
         self.relax(channel)
 
@@ -189,12 +199,12 @@ class ServoCtrl(threading.Thread):
             channels = [ch]
         if self._use_fallback:
             for idx in channels:
-                if idx == _PWM_LED_CHANNEL:
+                if idx == _PWM_LED_CHANNEL or idx in self._no_relax_channels:
                     continue
                 self.pwm_servo.set_pwm(idx, 0, 0)
         else:
             for idx in channels:
-                if idx == _PWM_LED_CHANNEL:
+                if idx == _PWM_LED_CHANNEL or idx in self._no_relax_channels:
                     continue
                 try:
                     channel_obj = self.pwm_servo.channels[idx]
