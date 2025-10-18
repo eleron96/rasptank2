@@ -14,7 +14,7 @@ _LOCK = threading.Lock()
 
 _DEFAULT_SHOULDER = {
     "base_angle": 90,
-    "raise_angle": 90,
+    "raise_angle": 60,
 }
 
 _current = {

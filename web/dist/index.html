@@ -1,1 +1,452 @@
-<!DOCTYPE html><html lang=en><head><meta charset=utf-8><meta http-equiv=X-UA-Compatible content="IE=edge"><meta name=viewport content="width=device-width,initial-scale=1"><!--[if IE]><link rel="icon" href="/favicon.ico"><![endif]--><title>adeept_bot_controller_web</title><link href=/css/app.6c0c2959.css rel=preload as=style><link href=/css/chunk-vendors.a6374dcc.css rel=preload as=style><link href=/js/app.6a3c9e3b.js rel=preload as=script><link href=/js/chunk-vendors.db45c901.js rel=preload as=script><link href=/css/chunk-vendors.a6374dcc.css rel=stylesheet><link href=/css/app.6c0c2959.css rel=stylesheet><link rel=icon type=image/png sizes=32x32 href=/favicon.ico><link rel=icon type=image/png sizes=16x16 href=/favicon.ico><link rel=manifest href=/manifest.json><meta name=theme-color content=#4DBA87><meta name=apple-mobile-web-app-capable content=no><meta name=apple-mobile-web-app-status-bar-style content=default><meta name=apple-mobile-web-app-title content=adeept_bot_controller_web><link rel=apple-touch-icon href=/favicon.ico><link rel=mask-icon href=/favicon.ico color=#4DBA87><meta name=msapplication-TileImage content=/favicon.ico><meta name=msapplication-TileColor content=#000000></head><body><noscript><strong>We're sorry but adeept_bot_controller_web doesn't work properly without JavaScript enabled. Please enable it to continue.</strong></noscript><div id=app></div><script src=/js/chunk-vendors.db45c901.js></script><script src=/js/app.6a3c9e3b.js></script><script src=/js/calibration.js></script><script src=/js/shoulder_calibration.js></script></body></html>
+<!DOCTYPE html>
+<html class="dark" lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RC Rover Control</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon.ico">
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon.ico">
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#101922">
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined">
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              primary: '#1173d4',
+              'background-dark': '#101922',
+              'panel-dark': '#111a22',
+              'panel-muted': '#233648',
+              'panel-accent': '#324d67'
+            },
+            fontFamily: {
+              display: ['Space Grotesk', 'sans-serif']
+            },
+            borderRadius: {
+              DEFAULT: '0.25rem',
+              lg: '0.5rem',
+              xl: '0.75rem',
+              full: '9999px'
+            }
+          }
+        }
+      };
+    </script>
+    <style>
+      body {
+        font-family: "Space Grotesk", system-ui, sans-serif;
+      }
+      .material-symbols-outlined {
+        font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      }
+      .action-toggle,
+      .primary-button,
+      .secondary-button,
+      .pad-button,
+      .arm-button {
+        transition: transform 0.15s ease, background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+      }
+      .action-toggle {
+        width: 100%;
+        border-radius: 0.65rem;
+        background-color: rgba(35, 54, 72, 0.8);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        padding: 0.6rem 0.85rem;
+        font-size: 0.85rem;
+        text-align: center;
+        color: rgba(255, 255, 255, 0.75);
+        font-weight: 500;
+      }
+      .action-toggle:hover,
+      .action-toggle:focus-visible,
+      .action-toggle.is-active {
+        background-color: rgba(17, 115, 212, 0.9);
+        border-color: rgba(17, 115, 212, 0.9);
+        color: #fff;
+        outline: none;
+        transform: translateY(-1px);
+      }
+      .primary-button {
+        background: linear-gradient(135deg, #1173d4, #0f5ca9);
+        color: #fff;
+        padding: 0.65rem 1rem;
+        border-radius: 0.75rem;
+        font-weight: 600;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .primary-button:hover,
+      .primary-button:focus-visible {
+        background: linear-gradient(135deg, #1581eb, #0f5ca9);
+        outline: none;
+        transform: translateY(-1px);
+      }
+      .secondary-button {
+        background-color: rgba(35, 54, 72, 0.7);
+        color: rgba(255, 255, 255, 0.85);
+        padding: 0.55rem 0.9rem;
+        border-radius: 0.75rem;
+        font-weight: 500;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      .secondary-button:hover,
+      .secondary-button:focus-visible {
+        background-color: rgba(17, 115, 212, 0.85);
+        color: #fff;
+        outline: none;
+        transform: translateY(-1px);
+      }
+      .secondary-button.is-active {
+        background-color: rgba(17, 115, 212, 0.9);
+        border-color: rgba(17, 115, 212, 0.9);
+        color: #fff;
+      }
+      .pad-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: 2.5rem;
+        width: 2.5rem;
+        border-radius: 0.65rem;
+        background-color: rgba(50, 77, 103, 0.85);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        color: rgba(255, 255, 255, 0.85);
+        font-weight: 600;
+        font-size: 0.9rem;
+      }
+      .pad-button:hover,
+      .pad-button.is-active {
+        background-color: #1173d4;
+        border-color: #1173d4;
+        color: #fff;
+      }
+      .pad-button:focus-visible {
+        outline: none;
+        transform: translateY(-1px);
+      }
+      .slider-field {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        font-size: 0.85rem;
+        color: rgba(255, 255, 255, 0.75);
+        font-weight: 500;
+      }
+      .slider-field input[type="range"] {
+        flex: 1;
+      }
+      .stat-card {
+        background-color: rgba(35, 54, 72, 0.65);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 0.9rem;
+        padding: 0.75rem 0.9rem;
+      }
+      .stat-title {
+        font-size: 0.75rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: rgba(255, 255, 255, 0.65);
+      }
+      .stat-value {
+        font-size: 1.05rem;
+        font-weight: 600;
+        color: rgba(255, 255, 255, 0.92);
+      }
+      .axis-chip {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.3rem;
+        border-radius: 0.65rem;
+        background-color: rgba(17, 115, 212, 0.15);
+        color: rgba(255, 255, 255, 0.85);
+        padding: 0.35rem 0.55rem;
+      }
+      .arm-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 2rem;
+        height: 2rem;
+        border-radius: 0.55rem;
+        background-color: rgba(50, 77, 103, 0.85);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        color: rgba(255, 255, 255, 0.85);
+      }
+      .arm-button:hover,
+      .arm-button.is-active {
+        background-color: #1173d4;
+        border-color: #1173d4;
+        color: #fff;
+      }
+      .arm-cluster[data-small="true"] .arm-button {
+        width: 1.75rem;
+        height: 1.75rem;
+      }
+      .scrollbar-thin::-webkit-scrollbar {
+        height: 6px;
+        width: 6px;
+      }
+      .scrollbar-thin::-webkit-scrollbar-thumb {
+        background-color: rgba(148, 163, 184, 0.35);
+        border-radius: 9999px;
+      }
+      .scrollbar-thin::-webkit-scrollbar-track {
+        background-color: transparent;
+      }
+    </style>
+  </head>
+  <body class="bg-background-dark text-white min-h-screen">
+    <div class="flex flex-col min-h-screen">
+      <header class="flex items-center justify-between gap-6 border-b border-panel-muted/70 px-8 py-4 bg-background-dark">
+        <div class="flex items-center gap-4">
+          <div class="size-9 rounded-full bg-primary/20 text-primary grid place-items-center">
+            <span class="material-symbols-outlined text-3xl">precision_manufacturing</span>
+          </div>
+          <div>
+            <h1 class="text-xl font-bold tracking-tight">RC Rover</h1>
+            <p class="text-sm text-white/60">Adeept Robot HAT Controller</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-6">
+          <div class="flex items-center gap-2 text-sm">
+            <span class="material-symbols-outlined text-green-400" id="connection-indicator">wifi_off</span>
+            <span id="connection-label">Disconnected</span>
+          </div>
+          <button id="reconnect-button" class="hidden h-9 rounded-full border border-white/20 px-4 text-sm font-medium text-white/80 hover:border-primary hover:text-primary transition">Reconnect</button>
+          <div class="w-10 h-10 rounded-full bg-center bg-cover bg-no-repeat border border-white/10" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuB5pl4hqpLBvw5Y-RD_py503jIqey476vo_NwOHW5cER63gbefDYuuumm3x4pyneKIVTGwUPquWI8npb347Egmx3ZkrEiJ3tqaqXVg7APQTqhx9w4uvqHB1dNEqT11kNwZYlxyQGCpzClpZ0RTo-y4sjSVR3X7OmgvNHq-qOzfZFyU12gRkGcBINc86vDT2iwFpf53tTTP5xntY8H6uTjVtEFC5MxTzEjR5XaPGG9iAyZzEvVM3xggYxg_IUDbDlFUhKdYHIBNDfSg');"></div>
+        </div>
+      </header>
+
+      <main class="flex flex-1 overflow-hidden">
+        <div class="grid grid-cols-1 lg:grid-cols-5 gap-5 p-5 flex-1 overflow-auto scrollbar-thin">
+          <section class="lg:col-span-3 flex flex-col gap-5">
+            <div class="relative aspect-video rounded-xl overflow-hidden bg-black/70 border border-white/5 shadow-xl">
+              <img id="video-stream" src="" alt="Rover camera feed" class="absolute inset-0 w-full h-full object-contain bg-black select-none pointer-events-none">
+              <button id="refresh-video" title="Reconnect camera" class="absolute bottom-4 right-4 flex items-center justify-center gap-2 rounded-full border border-white/15 bg-black/60 px-3 py-2 text-sm text-white/80 hover:border-primary hover:text-primary transition">
+                <span class="material-symbols-outlined text-base">refresh</span>
+                Refresh
+              </button>
+            </div>
+
+            <div class="bg-panel-dark border border-white/5 rounded-xl p-6 shadow-lg flex flex-col gap-6">
+              <div class="flex items-center justify-between">
+                <h2 class="text-lg font-semibold">Settings</h2>
+                <button id="open-calibration" class="inline-flex items-center gap-2 rounded-full border border-white/15 px-4 py-1.5 text-xs uppercase tracking-wide text-white/70 hover:border-primary hover:text-primary transition">
+                  <span class="material-symbols-outlined text-sm">tune</span>
+                  Shoulder calibration
+                </button>
+              </div>
+
+              <div class="grid lg:grid-cols-3 gap-5">
+                <div class="space-y-3">
+                  <p class="text-white/70 text-sm font-medium uppercase tracking-wide">Actions</p>
+                  <div class="grid grid-cols-1 gap-2">
+                    <button class="action-toggle" data-action="motionGet" data-off="stopCV">Motion Get</button>
+                    <button class="action-toggle" data-action="automatic" data-off="automaticOff">Auto Matic</button>
+                    <button class="action-toggle" data-action="police" data-off="policeOff">Police Light</button>
+                    <button class="action-toggle" data-action="trackLine" data-off="trackLineOff">Track Line</button>
+                    <button class="action-toggle" data-action="ledOn" data-off="ledOff">LED Light</button>
+                  </div>
+                </div>
+
+                <div class="lg:col-span-2 space-y-5">
+                  <div class="grid lg:grid-cols-2 gap-5">
+                    <div class="space-y-3">
+                      <p class="text-white/70 text-sm font-medium uppercase tracking-wide">FC Control</p>
+                      <div class="space-y-3 bg-panel-muted/40 border border-white/5 rounded-lg p-4">
+                        <button id="fc-toggle" class="primary-button w-full">Start</button>
+                        <label class="flex items-center justify-between gap-4 text-sm text-white/70">
+                          <span>Color</span>
+                          <input id="fc-color" type="color" class="h-9 w-16 rounded border border-white/10 bg-panel-accent" value="#1173d4">
+                        </label>
+                      </div>
+                    </div>
+
+                    <div class="space-y-3">
+                      <p class="text-white/70 text-sm font-medium uppercase tracking-wide">CVFL Control</p>
+                      <div class="space-y-4 bg-panel-muted/40 border border-white/5 rounded-lg p-4">
+                        <button id="cvfl-toggle" class="primary-button w-full">Start</button>
+                        <div class="space-y-3">
+                          <label class="slider-field">
+                            <span>L1</span>
+                            <input id="cvfl-l1" type="range" min="0" max="480" value="380">
+                          </label>
+                          <label class="slider-field">
+                            <span>L2</span>
+                            <input id="cvfl-l2" type="range" min="0" max="480" value="440">
+                          </label>
+                          <label class="slider-field">
+                            <span>SP</span>
+                            <input id="cvfl-sp" type="range" min="0" max="200" value="20">
+                          </label>
+                        </div>
+                        <button id="cvfl-color-toggle" class="secondary-button w-full">Color: <span id="cvfl-color-label">#FFFFFF</span></button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="lg:col-span-1 flex flex-col bg-panel-dark border border-white/5 rounded-xl p-5 gap-4 shadow-lg">
+            <h2 class="text-lg font-semibold">Rover Stats</h2>
+            <div class="flex flex-col gap-4 flex-1 overflow-y-auto scrollbar-thin pr-1">
+              <div class="stat-card">
+                <div class="flex justify-between items-center mb-2">
+                  <p class="stat-title">Battery</p>
+                  <p class="stat-value"><span id="battery-percent">--</span>%</p>
+                </div>
+                <div class="h-16">
+                  <canvas id="battery-chart"></canvas>
+                </div>
+              </div>
+              <div class="stat-card">
+                <div class="flex justify-between items-center mb-2">
+                  <p class="stat-title">CPU Load</p>
+                  <p class="stat-value"><span id="cpu-usage">--</span>%</p>
+                </div>
+                <div class="h-16">
+                  <canvas id="cpu-chart"></canvas>
+                </div>
+              </div>
+              <div class="grid grid-cols-2 gap-3">
+                <div class="stat-card">
+                  <p class="stat-title">CPU Temp</p>
+                  <p class="stat-value"><span id="cpu-temp">--</span>°C</p>
+                </div>
+                <div class="stat-card">
+                  <p class="stat-title">RAM Usage</p>
+                  <p class="stat-value"><span id="ram-usage">--</span>%</p>
+                </div>
+                <div class="stat-card">
+                  <p class="stat-title">Voltage</p>
+                  <p class="stat-value"><span id="battery-voltage">--</span>V</p>
+                </div>
+                <div class="stat-card">
+                  <p class="stat-title">Speed</p>
+                  <p class="stat-value"><span id="speed-value">100</span></p>
+                </div>
+              </div>
+              <div class="stat-card space-y-2">
+                <p class="stat-title">Gyroscope (°/s)</p>
+                <div class="grid grid-cols-3 gap-2 text-xs">
+                  <div class="axis-chip">X <span id="gyro-x">--</span></div>
+                  <div class="axis-chip">Y <span id="gyro-y">--</span></div>
+                  <div class="axis-chip">Z <span id="gyro-z">--</span></div>
+                </div>
+              </div>
+              <div class="stat-card space-y-2">
+                <p class="stat-title">Accelerometer (g)</p>
+                <div class="grid grid-cols-3 gap-2 text-xs">
+                  <div class="axis-chip">X <span id="accel-x">--</span></div>
+                  <div class="axis-chip">Y <span id="accel-y">--</span></div>
+                  <div class="axis-chip">Z <span id="accel-z">--</span></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <aside class="lg:col-span-1 bg-panel-dark border border-white/5 rounded-xl p-5 flex flex-col gap-5 shadow-lg">
+            <h2 class="text-lg font-semibold">Controls</h2>
+
+            <div class="bg-panel-muted/40 border border-white/5 rounded-xl p-4 flex flex-col gap-4">
+              <p class="text-sm text-white/70 font-medium text-center tracking-wide uppercase">Rover Movement</p>
+              <div class="grid grid-cols-3 gap-2 w-36 mx-auto">
+                <div></div>
+                <button class="pad-button" data-command="forward" data-stop="DS" data-keys="KeyW,ArrowUp">W</button>
+                <div></div>
+                <button class="pad-button" data-command="left" data-stop="TS" data-keys="KeyA,ArrowLeft">A</button>
+                <button class="pad-button" data-command="backward" data-stop="DS" data-keys="KeyS,ArrowDown">S</button>
+                <button class="pad-button" data-command="right" data-stop="TS" data-keys="KeyD,ArrowRight">D</button>
+              </div>
+              <div class="flex items-center justify-between gap-4">
+                <span class="text-sm text-white/70 uppercase tracking-wide">Speed</span>
+                <input id="speed-slider" type="range" min="10" max="200" value="100" class="w-full accent-primary">
+              </div>
+            </div>
+
+            <div class="bg-panel-muted/40 border border-white/5 rounded-xl p-4 space-y-4">
+              <p class="text-sm text-white/70 font-medium text-center tracking-wide uppercase">Arm &amp; Gripper</p>
+              <div class="grid grid-cols-2 gap-2 text-xs">
+                <div class="arm-cluster" data-label="Gripper" data-command="grab" data-stop="GLstop" data-command-alt="loose"></div>
+                <div class="arm-cluster" data-label="Shoulder" data-command="armUp" data-stop="armStop" data-command-alt="armDown"></div>
+                <div class="arm-cluster" data-label="Wrist" data-command="handUp" data-stop="handStop" data-command-alt="handDown"></div>
+                <div class="arm-cluster" data-label="Rotate" data-command="lookleft" data-stop="LRstop" data-command-alt="lookright" data-icons="arrow_back,arrow_forward"></div>
+                <div class="arm-cluster" data-label="Camera" data-command="up" data-stop="UDstop" data-command-alt="down"></div>
+              </div>
+            </div>
+
+            <div class="mt-auto space-y-3">
+              <p class="text-sm text-white/70 font-medium text-center uppercase tracking-wide">Utilities</p>
+              <div class="grid grid-cols-2 gap-3">
+                <button class="secondary-button" data-command="home">Servo Home</button>
+                <button class="secondary-button" data-command="steadyCamera" data-off="steadyCameraOff">Steady Cam</button>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </main>
+    </div>
+
+    <div id="calibration-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div class="w-full max-w-md rounded-2xl border border-white/10 bg-panel-dark p-6 shadow-xl space-y-5">
+        <div class="flex items-center justify-between">
+          <h3 class="text-lg font-semibold">Shoulder Calibration</h3>
+          <button class="size-8 grid place-items-center rounded-full border border-white/10 hover:border-primary hover:text-primary transition" data-close>
+            <span class="material-symbols-outlined text-lg">close</span>
+          </button>
+        </div>
+        <div class="space-y-4 text-sm text-white/70">
+          <label class="flex items-center justify-between gap-4">
+            <span>Base angle (°)</span>
+            <input id="calibration-base" type="number" min="0" max="180" class="h-10 w-24 rounded border border-white/15 bg-panel-accent px-3">
+          </label>
+          <label class="flex items-center justify-between gap-4">
+            <span>Raise offset (°)</span>
+            <input id="calibration-raise" type="number" min="5" max="120" class="h-10 w-24 rounded border border-white/15 bg-panel-accent px-3">
+          </label>
+          <p class="text-xs text-white/50 leading-relaxed">
+            The base angle defines the neutral shoulder position. The raise offset controls how far the joint can lift above the base.
+          </p>
+          <div class="pt-3 border-t border-white/10 space-y-3">
+            <p class="text-xs uppercase tracking-wide text-white/60">Battery Voltage Calibration</p>
+            <label class="flex items-center justify-between gap-4">
+              <span>Measured voltage (V)</span>
+              <input id="calibration-voltage" type="number" min="0" step="0.01" class="h-10 w-28 rounded border border-white/15 bg-panel-accent px-3">
+            </label>
+            <button id="calibration-run" class="secondary-button w-full justify-center">Calibrate Voltage</button>
+          </div>
+          <div id="calibration-status" class="text-xs text-white/60 h-4"></div>
+        </div>
+        <div class="flex justify-end gap-3">
+          <button class="secondary-button" data-close>Cancel</button>
+          <button id="calibration-save" class="primary-button">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <template id="arm-cluster-template">
+      <div class="bg-panel-muted/40 border border-white/5 rounded-lg p-3 flex flex-col items-center gap-2">
+        <p class="text-[11px] uppercase tracking-wide text-white/60 cluster-label">Label</p>
+        <div class="flex items-center gap-1">
+          <button class="arm-button" data-role="primary">
+            <span class="material-symbols-outlined text-base" data-icon="primary">arrow_upward</span>
+          </button>
+          <button class="arm-button" data-role="secondary">
+            <span class="material-symbols-outlined text-base" data-icon="secondary">arrow_downward</span>
+          </button>
+        </div>
+      </div>
+    </template>
+
+    <script src="/js/rover-ui.js" defer></script>
+  </body>
+</html>

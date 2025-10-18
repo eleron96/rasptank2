@@ -1,7 +1,7 @@
 (function () {
   const API_URL = "/api/servo/shoulder";
-  const HOST_CARD_TITLE = "Arm Control";
-  const PANEL_ID = "shoulder-calibration";
+  const CARD_ID = "settings-card";
+  const MODAL_ID = "settings-modal";
 
   function onReady(fn) {
     if (document.readyState === "loading") {
@@ -11,101 +11,11 @@
     }
   }
 
-  function ensureStyle() {
-    if (document.getElementById(`${PANEL_ID}-style`)) {
-      return;
-    }
-    const style = document.createElement("style");
-    style.id = `${PANEL_ID}-style`;
-    style.textContent = `
-      .${PANEL_ID} {
-        margin-top: 12px;
-        padding: 12px;
-        background: rgba(255,255,255,0.06);
-        border-radius: 10px;
-        display: grid;
-        gap: 10px;
-      }
-      .${PANEL_ID} h4 {
-        margin: 0;
-        font-size: 16px;
-        font-weight: 600;
-        color: rgba(255,255,255,0.9);
-      }
-      .${PANEL_ID} label {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        font-size: 14px;
-        gap: 10px;
-        color: rgba(255,255,255,0.85);
-      }
-      .${PANEL_ID} input[type="number"] {
-        flex: 0 0 110px;
-        border-radius: 6px;
-        border: 1px solid rgba(255,255,255,0.18);
-        background: rgba(0,0,0,0.25);
-        padding: 6px 8px;
-        color: #fff;
-        font-size: 14px;
-      }
-      .${PANEL_ID} input[type="number"]:focus {
-        border-color: #42a5f5;
-        outline: none;
-      }
-      .${PANEL_ID} .actions {
-        display: flex;
-        justify-content: flex-end;
-        gap: 8px;
-      }
-      .${PANEL_ID} button {
-        cursor: pointer;
-        border: none;
-        border-radius: 6px;
-        padding: 8px 14px;
-        font-size: 14px;
-        font-weight: 600;
-        background: linear-gradient(135deg,#42a5f5,#478ed1);
-        color: #fff;
-        transition: filter 0.2s ease;
-      }
-      .${PANEL_ID} button:disabled {
-        opacity: 0.6;
-        cursor: default;
-      }
-      .${PANEL_ID} button:not(:disabled):hover {
-        filter: brightness(1.1);
-      }
-      .${PANEL_ID} .hint {
-        font-size: 12px;
-        color: rgba(255,255,255,0.65);
-      }
-      .${PANEL_ID} .status {
-        font-size: 12px;
-        min-height: 16px;
-        color: rgba(255,255,255,0.8);
-      }
-      .${PANEL_ID} .status.error {
-        color: #ff9e9e;
-      }
-    `;
-    document.head.appendChild(style);
-  }
-
-  function findArmControlWrapper() {
-    const cards = document.querySelectorAll(".mod-sheet");
-    for (const card of cards) {
-      const title = card.querySelector(".mod-title");
-      if (title && title.textContent.trim() === HOST_CARD_TITLE) {
-        return card.querySelector(".mod-wrapper");
-      }
-    }
-    return null;
-  }
-
   function fetchCalibration() {
     return fetch(API_URL, { credentials: "same-origin" }).then((res) => {
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
       return res.json();
     });
   }
@@ -127,98 +37,258 @@
     );
   }
 
-  function buildPanel(wrapper) {
-    if (!wrapper || wrapper.querySelector(`.${PANEL_ID}`)) {
-      return;
+  function findSettingsColumn() {
+    const titles = document.querySelectorAll(".mod-sheet .mod-title");
+    for (const title of titles) {
+      if (!title || !title.textContent) {
+        continue;
+      }
+      const label = title.textContent.trim().toLowerCase();
+      if (label === "hard ware" || label === "hardware" || label === "оборудование") {
+        const column = title.closest(".v-col");
+        if (column) {
+          return column;
+        }
+      }
     }
-    ensureStyle();
+    const columns = document.querySelectorAll(".controll-area .v-row > .v-col");
+    if (columns.length) {
+      return columns[columns.length - 1];
+    }
+    return document.querySelector(".area-wrapper .v-container") || document.body;
+  }
 
-    const panel = document.createElement("div");
-    panel.className = PANEL_ID;
-    panel.innerHTML = `
-      <h4>Shoulder Calibration</h4>
-      <label>
-        Initial angle (°)
-        <input type="number" min="0" max="180" step="1" value="90" id="${PANEL_ID}-base" />
-      </label>
-      <label>
-        Raise offset (° from base)
-        <input type="number" min="0" max="180" step="1" value="90" id="${PANEL_ID}-raise" />
-      </label>
-      <div class="hint">Initial angle is absolute; raise is the additional travel from that base.</div>
-      <div class="actions">
-        <button type="button" id="${PANEL_ID}-save">Save</button>
+  let modalInstance = null;
+
+  function getModalInstance() {
+    if (modalInstance) {
+      return modalInstance;
+    }
+
+    const root = document.createElement("div");
+    root.id = MODAL_ID;
+    root.className = "settings-modal";
+    root.innerHTML = `
+      <div class="settings-modal__backdrop" data-action="close"></div>
+      <div class="settings-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="${MODAL_ID}-title">
+        <div class="settings-modal__header">
+          <h3 class="settings-modal__title" id="${MODAL_ID}-title">Калибровка плеча</h3>
+          <button type="button" class="settings-modal__close" data-action="close" aria-label="Закрыть">×</button>
+        </div>
+        <div class="settings-modal__content">
+          <div class="settings-modal__field">
+            <label for="${MODAL_ID}-base">Базовый угол (°)</label>
+            <input type="number" min="0" max="180" step="1" id="${MODAL_ID}-base" autocomplete="off" inputmode="decimal" />
+          </div>
+          <div class="settings-modal__field">
+            <label for="${MODAL_ID}-raise">Угол подъёма (°)</label>
+            <input type="number" min="5" max="120" step="1" id="${MODAL_ID}-raise" autocomplete="off" inputmode="decimal" />
+          </div>
+          <div class="settings-modal__hint">
+            Базовый угол — абсолютное положение сервопривода. Значение «подъём» задаёт дополнительный ход вверх от базового положения.
+          </div>
+          <div class="settings-modal__status" id="${MODAL_ID}-status"></div>
+        </div>
+        <div class="settings-modal__actions">
+          <button type="button" class="settings-modal__secondary" data-action="cancel">Отмена</button>
+          <button type="button" class="settings-modal__primary" data-action="save">Сохранить</button>
+        </div>
       </div>
-      <div class="status" id="${PANEL_ID}-status"></div>
     `;
-    wrapper.appendChild(panel);
+    document.body.appendChild(root);
 
-    const baseInput = panel.querySelector(`#${PANEL_ID}-base`);
-    const raiseInput = panel.querySelector(`#${PANEL_ID}-raise`);
-    const saveBtn = panel.querySelector(`#${PANEL_ID}-save`);
-    const status = panel.querySelector(`#${PANEL_ID}-status`);
+    const baseInput = root.querySelector(`#${MODAL_ID}-base`);
+    const raiseInput = root.querySelector(`#${MODAL_ID}-raise`);
+    const statusEl = root.querySelector(`#${MODAL_ID}-status`);
+    const saveBtn = root.querySelector('[data-action="save"]');
+    const cancelBtn = root.querySelector('[data-action="cancel"]');
+    const closeButtons = root.querySelectorAll('[data-action="close"]');
 
-    function setStatus(message, isError) {
-      status.textContent = message || "";
-      status.classList.toggle("error", Boolean(isError));
-    }
+    const state = {
+      root,
+      baseInput,
+      raiseInput,
+      statusEl,
+      saveBtn,
+      cancelBtn,
+      closeButtons,
+      active: false,
+      keyHandler: null,
+    };
 
-    function fillValues(data) {
+    const setStatus = function (message, type) {
+      state.statusEl.textContent = message || "";
+      if (type) {
+        state.statusEl.setAttribute("data-state", type);
+      } else {
+        state.statusEl.removeAttribute("data-state");
+      }
+    };
+
+    const fillValues = function (data) {
       const calibration = data && data.calibration ? data.calibration : data;
       if (!calibration) {
         return;
       }
-      if (typeof calibration.base_angle === "number") {
-        baseInput.value = calibration.base_angle.toFixed(0);
+      if (typeof calibration.base_angle === "number" && !Number.isNaN(calibration.base_angle)) {
+        state.baseInput.value = calibration.base_angle.toFixed(0);
       }
-      if (typeof calibration.raise_angle === "number") {
-        raiseInput.value = calibration.raise_angle.toFixed(0);
+      if (typeof calibration.raise_angle === "number" && !Number.isNaN(calibration.raise_angle)) {
+        state.raiseInput.value = calibration.raise_angle.toFixed(0);
       }
-    }
+    };
 
-    saveBtn.addEventListener("click", () => {
-      const base = Number(baseInput.value);
-      const raise = Number(raiseInput.value);
-      if (Number.isNaN(base) || Number.isNaN(raise)) {
-        setStatus("Enter valid angle values.", true);
+    const closeModal = function () {
+      if (!state.active) {
         return;
       }
-      setStatus("Saving...", false);
-      saveBtn.disabled = true;
-      postCalibration({ base_angle: base, raise_angle: raise })
+      state.active = false;
+      root.classList.remove("is-visible");
+      document.body.classList.remove("has-settings-modal");
+      setStatus("", null);
+      state.saveBtn.disabled = false;
+      if (state.keyHandler) {
+        document.removeEventListener("keydown", state.keyHandler, true);
+        state.keyHandler = null;
+      }
+    };
+
+    const loadCalibration = function () {
+      setStatus("Загрузка…", null);
+      state.saveBtn.disabled = true;
+      fetchCalibration()
         .then((data) => {
           fillValues(data);
-          setStatus("Calibration saved.", false);
+          setStatus("", null);
         })
         .catch((err) => {
-          setStatus(err.message || "Failed to save.", true);
+          setStatus(`Не удалось загрузить: ${err.message}`, "error");
         })
         .finally(() => {
-          saveBtn.disabled = false;
+          state.saveBtn.disabled = false;
+          requestAnimationFrame(() => {
+            state.baseInput.focus();
+          });
         });
+    };
+
+    const validate = function () {
+      const base = Number(state.baseInput.value);
+      const raise = Number(state.raiseInput.value);
+      if (!Number.isFinite(base) || !Number.isFinite(raise)) {
+        return { ok: false, message: "Введите числовые значения." };
+      }
+      if (base < 0 || base > 180) {
+        return { ok: false, message: "Базовый угол должен быть в диапазоне 0-180°." };
+      }
+      if (raise < 5 || raise > 120) {
+        return { ok: false, message: "Угол подъёма должен быть в диапазоне 5-120°." };
+      }
+      return { ok: true, base, raise };
+    };
+
+    const saveCalibration = function () {
+      const result = validate();
+      if (!result.ok) {
+        setStatus(result.message, "error");
+        return;
+      }
+      setStatus("Сохранение…", null);
+      state.saveBtn.disabled = true;
+      postCalibration({
+        base_angle: result.base,
+        raise_angle: result.raise,
+      })
+        .then((data) => {
+          fillValues(data);
+          setStatus("Настройки сохранены.", "success");
+        })
+        .catch((err) => {
+          setStatus(err.message || "Не удалось сохранить настройки.", "error");
+        })
+        .finally(() => {
+          state.saveBtn.disabled = false;
+        });
+    };
+
+    const openModal = function () {
+      if (state.active) {
+        return;
+      }
+      state.active = true;
+      root.classList.add("is-visible");
+      document.body.classList.add("has-settings-modal");
+      loadCalibration();
+      state.keyHandler = function (event) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          closeModal();
+        }
+      };
+      document.addEventListener("keydown", state.keyHandler, true);
+    };
+
+    state.saveBtn.addEventListener("click", saveCalibration);
+    state.cancelBtn.addEventListener("click", closeModal);
+    state.closeButtons.forEach((btn) => {
+      btn.addEventListener("click", closeModal);
+    });
+    root.addEventListener("click", (event) => {
+      const action = event.target && event.target.getAttribute("data-action");
+      if (action === "close") {
+        closeModal();
+      }
     });
 
-    fetchCalibration()
-      .then((data) => {
-        fillValues(data);
-        setStatus("", false);
-      })
-      .catch((err) => {
-        setStatus(`Failed to load calibration: ${err.message}`, true);
+    modalInstance = {
+      open: openModal,
+      close: closeModal,
+      setStatus,
+      fillValues,
+    };
+    return modalInstance;
+  }
+
+  function ensureSettingsCard() {
+    if (document.getElementById(CARD_ID)) {
+      return true;
+    }
+    const column = findSettingsColumn();
+    if (!column) {
+      return false;
+    }
+    const card = document.createElement("div");
+    card.id = CARD_ID;
+    card.className = "v-sheet v-sheet--outlined theme--dark mod-sheet settings-card";
+    card.innerHTML = `
+      <p class="mod-title">Настройки</p>
+      <div class="mod-wrapper">
+        <div class="status-wrapper settings-wrapper">
+          <button type="button" class="settings-chip" data-action="open-calibration">
+            <span class="chip-title">Калибровка</span>
+            <span class="chip-value">Плечо · открыть</span>
+          </button>
+        </div>
+      </div>
+    `;
+    column.appendChild(card);
+    const button = card.querySelector('[data-action="open-calibration"]');
+    if (button) {
+      button.addEventListener("click", () => {
+        const modal = getModalInstance();
+        modal.open();
       });
+    }
+    return true;
   }
 
   function init() {
-    const wrapper = findArmControlWrapper();
-    if (wrapper) {
-      buildPanel(wrapper);
+    if (ensureSettingsCard()) {
       return;
     }
     const observer = new MutationObserver(() => {
-      const targetWrapper = findArmControlWrapper();
-      if (targetWrapper) {
+      if (ensureSettingsCard()) {
         observer.disconnect();
-        buildPanel(targetWrapper);
       }
     });
     observer.observe(document.body, { childList: true, subtree: true });

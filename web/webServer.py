@@ -6,11 +6,13 @@
 
 import time
 import threading
-from concurrent.futures import ThreadPoolExecutor
 import logging
+from concurrent.futures import ThreadPoolExecutor
+from typing import Optional
 import move
 import os
 import info
+import imu_sensor
 import RPIservo
 
 import functions
@@ -21,6 +23,8 @@ import pwm_led
 import battery_monitor
 import servo_calibration
 import socket
+from events import event_bus
+from pca9685_driver import angle_to_us
 
 #websocket
 import asyncio
@@ -39,10 +43,25 @@ turnWiggle = 60
 
 SHOULDER_SERVO_CHANNEL = 0
 SHOULDER_DRIVE_SPEED = 2
+LVC_DISABLED = os.getenv("SHOULDER_LVC_DISABLE", "1").strip() in ("1", "true", "on")
+LVC_LOWER_V = float(os.getenv("SHOULDER_LVC_LOWER", "6.0"))
+LVC_UPPER_V = float(os.getenv("SHOULDER_LVC_UPPER", "6.2"))
+LVC_EMA_ALPHA = float(os.getenv("SHOULDER_LVC_ALPHA", "0.2"))
 
 logger = logging.getLogger("rasptank")
 
 _COMMAND_EXECUTOR = ThreadPoolExecutor(max_workers=1)
+_shoulder_state = {
+    "mode": "IDLE",
+    "last_cmd": None,
+    "last_cmd_ts": 0.0,
+}
+
+_shoulder_timeout_lock = threading.Lock()
+_shoulder_timeout = None
+
+
+_lvc_state = {"ema": None, "blocked": False}
 
 scGear = RPIservo.ServoCtrl()
 # scGear.setup()
@@ -88,26 +107,38 @@ def _apply_shoulder_calibration(calibration):
     if not isinstance(calibration, dict):
         return
     base = _clamp_angle(float(calibration.get("base_angle", 90.0)))
-    raise_angle = _clamp_angle(float(calibration.get("raise_angle", 45.0)))
-    max_angle = max(0.0, min(180.0, base + raise_angle))
-    min_angle = max(0.0, min(180.0, base))
-    if max_angle < min_angle:
-        max_angle = min_angle
+    span = _clamp_angle(float(calibration.get("raise_angle", 60.0)))
+    span = max(5.0, min(span, 60.0))
+
+    lower_angle = max(0.0, base - span)
+    upper_angle = min(180.0, base + span)
+
+    if upper_angle - lower_angle < 2.0:
+        # expand to a minimal workable window around the base
+        span = max(span, 5.0)
+        lower_angle = max(0.0, base - span)
+        upper_angle = min(180.0, base + span)
+        if upper_angle - lower_angle < 2.0:
+            lower_angle = max(0.0, min(base, 178.0))
+            upper_angle = min(180.0, lower_angle + 2.0)
+
     _shoulder_calibration = {
         "base_angle": base,
-        "raise_angle": raise_angle,
+        "raise_angle": span,
     }
 
     try:
-        target = int(round(base))
+        target_angle = max(lower_angle, min(upper_angle, base))
+        target = int(round(target_angle))
         H1_sc.initConfig(SHOULDER_SERVO_CHANNEL, target, 1)
-        H1_sc.maxPos[SHOULDER_SERVO_CHANNEL] = int(round(max_angle))
-        H1_sc.minPos[SHOULDER_SERVO_CHANNEL] = int(round(min_angle))
+        H1_sc.maxPos[SHOULDER_SERVO_CHANNEL] = int(round(upper_angle))
+        H1_sc.minPos[SHOULDER_SERVO_CHANNEL] = int(round(lower_angle))
         H1_sc.goalPos[SHOULDER_SERVO_CHANNEL] = target
         H1_sc.nowPos[SHOULDER_SERVO_CHANNEL] = target
         H1_sc.lastPos[SHOULDER_SERVO_CHANNEL] = target
         H1_sc.bufferPos[SHOULDER_SERVO_CHANNEL] = float(target)
         H1_sc.stopWiggle()
+        _shoulder_state["mode"] = "IDLE"
         _log_shoulder_state("shoulder_calibrated", target=target)
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.error({"evt": "shoulder_calibration_error", "error": str(exc)})
@@ -141,6 +172,24 @@ def log_servo_action(action, **extra):
     payload = {"evt": "servo_action", "action": action}
     payload.update(extra)
     logger.info(payload)
+
+def _get_shoulder_angle() -> Optional[float]:
+    try:
+        angle = H1_sc.nowPos[SHOULDER_SERVO_CHANNEL]
+    except Exception:
+        return None
+    if angle is None:
+        return None
+    try:
+        return float(angle)
+    except (TypeError, ValueError):
+        return None
+
+def _log_shoulder_action(action: str, **extra) -> None:
+    angle = _get_shoulder_angle()
+    if angle is not None:
+        extra.setdefault("angle_deg", round(angle, 2))
+    log_servo_action(action, **extra)
 
 def log_led_action(action, **extra):
     payload = {"evt": "led_action", "action": action}
@@ -309,17 +358,33 @@ def robotCtrl(command_input, response):
             move.motorStop()
 
     elif 'armUp' == command_input: #servo A
-        log_servo_action('armUp')
+        if _shoulder_guard_blocked("up"):
+            return
+        if _shoulder_at_edge(move_up=True):
+            _shoulder_stop("limit_max")
+            return
+        _shoulder_state["mode"] = "UP"
+        _shoulder_state["last_cmd"] = "armUp"
+        _shoulder_state["last_cmd_ts"] = time.time()
+        _log_shoulder_action('armUp')
         H1_sc.singleServo(SHOULDER_SERVO_CHANNEL, -1, SHOULDER_DRIVE_SPEED)
+        _schedule_shoulder_timeout()
         _log_shoulder_state("shoulder_cmd", direction="up")
     elif 'armDown' == command_input:
-        log_servo_action('armDown')
+        if _shoulder_guard_blocked("down"):
+            return
+        if _shoulder_at_edge(move_up=False):
+            _shoulder_stop("limit_min")
+            return
+        _shoulder_state["mode"] = "DOWN"
+        _shoulder_state["last_cmd"] = "armDown"
+        _shoulder_state["last_cmd_ts"] = time.time()
+        _log_shoulder_action('armDown')
         H1_sc.singleServo(SHOULDER_SERVO_CHANNEL, 1, SHOULDER_DRIVE_SPEED)
+        _schedule_shoulder_timeout()
         _log_shoulder_state("shoulder_cmd", direction="down")
     elif 'armStop' in command_input:
-        log_servo_action('armStop')
-        H1_sc.stopWiggle()
-        _log_shoulder_state("shoulder_cmd", direction="stop")
+        _shoulder_stop("manual")
 
     elif 'handUp' == command_input: # servo B
         log_servo_action('handUp')
@@ -366,6 +431,7 @@ def robotCtrl(command_input, response):
 
 
     elif 'home' == command_input:
+        _cancel_shoulder_timeout()
         log_servo_action('home')
         H1_sc.moveServoInit(0)
         H2_sc.moveServoInit(1)
@@ -468,30 +534,186 @@ def _dispatch_hardware_command(command_input: str) -> None:
     _COMMAND_EXECUTOR.submit(_process_hardware_command, command_input)
 
 
-def _log_shoulder_state(event: str, **extra) -> None:
+def _update_lvc_state(measurement: Optional[float] = None) -> bool:
+    if LVC_DISABLED:
+        if _lvc_state["blocked"]:
+            _lvc_state["blocked"] = False
+            event_bus.publish(
+                "shoulder_guard",
+                {"state": "released", "reason": "lvc_disabled"},
+            )
+        return False
+    if battery is None:
+        return False
     try:
-        now_pos = H1_sc.nowPos[SHOULDER_SERVO_CHANNEL]
+        if measurement is None:
+            measurement = battery.read_voltage()
+    except Exception as exc:
+        logger.warning({"evt": "battery_read_error", "error": str(exc)})
+        return _lvc_state["blocked"]
+    if measurement is None or measurement <= 0:
+        return _lvc_state["blocked"]
+
+    ema = _lvc_state["ema"]
+    if ema is None:
+        ema = measurement
+    else:
+        ema = LVC_EMA_ALPHA * measurement + (1.0 - LVC_EMA_ALPHA) * ema
+    _lvc_state["ema"] = ema
+
+    blocked = _lvc_state["blocked"]
+    if blocked:
+        if ema >= LVC_UPPER_V:
+            _lvc_state["blocked"] = False
+            event_bus.publish(
+                "shoulder_guard",
+                {"state": "released", "reason": "lvc_recovered", "voltage": round(ema, 2)},
+            )
+    else:
+        if ema <= LVC_LOWER_V:
+            _lvc_state["blocked"] = True
+            event_bus.publish(
+                "shoulder_guard",
+                {"state": "blocked", "reason": "lvc", "voltage": round(ema, 2)},
+            )
+    return _lvc_state["blocked"]
+
+
+def _log_shoulder_state(event: str, **extra) -> None:
+    now_pos = _get_shoulder_angle()
+    try:
         goal_pos = H1_sc.goalPos[SHOULDER_SERVO_CHANNEL]
         speed = H1_sc.scSpeed[SHOULDER_SERVO_CHANNEL]
     except Exception:
-        now_pos = goal_pos = speed = None
+        goal_pos = speed = None
+
+    min_angle = None
+    max_angle = None
+    try:
+        min_angle = H1_sc.minPos[SHOULDER_SERVO_CHANNEL]
+        max_angle = H1_sc.maxPos[SHOULDER_SERVO_CHANNEL]
+    except Exception:
+        pass
+
+    min_us = getattr(H1_sc, "_servo_min_pulse_us", 500)
+    max_us = getattr(H1_sc, "_servo_max_pulse_us", 2400)
+    us_now = angle_to_us(now_pos or 0, min_us, max_us) if now_pos is not None else None
+    us_goal = angle_to_us(goal_pos or 0, min_us, max_us) if goal_pos is not None else None
+
+    edge = "none"
+    if now_pos is not None and min_angle is not None and max_angle is not None:
+        if now_pos <= min_angle + 1:
+            edge = "min"
+        elif now_pos >= max_angle - 1:
+            edge = "max"
+
     telemetry = {
         "evt": event,
         "servo": "shoulder",
         "channel": SHOULDER_SERVO_CHANNEL,
+        "state": _shoulder_state["mode"],
+        "angle_deg": round(now_pos, 2) if now_pos is not None else None,
         "now": now_pos,
         "goal": goal_pos,
         "speed": speed,
+        "us_now": us_now,
+        "us_goal": us_goal,
+        "edge": edge,
         "calibration": dict(_shoulder_calibration),
     }
+
+    voltage = None
     if battery is not None:
         try:
-            telemetry["vbat"] = round(battery.read_voltage(), 2)
+            voltage = round(battery.read_voltage(), 2)
+            telemetry["vbat"] = voltage
             telemetry["vbat_pct"] = battery.read_percentage()
         except Exception as exc:
             telemetry["vbat_error"] = str(exc)
+
+    blocked = _update_lvc_state(voltage)
+    telemetry["vbat_filtered"] = round(_lvc_state["ema"], 2) if _lvc_state["ema"] else None
+    telemetry["lvc_blocked"] = blocked
+
     telemetry.update(extra)
     logger.info(telemetry)
+
+
+def _cancel_shoulder_timeout() -> None:
+    global _shoulder_timeout
+    with _shoulder_timeout_lock:
+        if _shoulder_timeout is not None:
+            try:
+                _shoulder_timeout.cancel()
+            finally:
+                _shoulder_timeout = None
+
+
+def _shoulder_timeout_callback() -> None:
+    global _shoulder_timeout
+    with _shoulder_timeout_lock:
+        _shoulder_timeout = None
+    if _shoulder_state.get("mode") in ("UP", "DOWN"):
+        _COMMAND_EXECUTOR.submit(_shoulder_stop, "timeout_guard")
+
+
+def _schedule_shoulder_timeout(delay: float = 1.2) -> None:
+    global _shoulder_timeout
+    with _shoulder_timeout_lock:
+        if _shoulder_timeout is not None:
+            try:
+                _shoulder_timeout.cancel()
+            finally:
+                _shoulder_timeout = None
+        timer = threading.Timer(delay, _shoulder_timeout_callback)
+        timer.daemon = True
+        _shoulder_timeout = timer
+        timer.start()
+
+
+def _shoulder_stop(reason: str) -> None:
+    _cancel_shoulder_timeout()
+    H1_sc.stopWiggle()
+    _shoulder_state["mode"] = "IDLE"
+    _shoulder_state["last_cmd"] = "armStop"
+    _shoulder_state["last_cmd_ts"] = time.time()
+    _log_shoulder_action('armStop', reason=reason)
+    _log_shoulder_state("shoulder_cmd", direction="stop", reason=reason)
+
+
+def _shoulder_at_edge(move_up: bool) -> bool:
+    try:
+        now_pos = H1_sc.nowPos[SHOULDER_SERVO_CHANNEL]
+        min_angle = H1_sc.minPos[SHOULDER_SERVO_CHANNEL]
+        max_angle = H1_sc.maxPos[SHOULDER_SERVO_CHANNEL]
+    except Exception:
+        return False
+    if now_pos is None or min_angle is None or max_angle is None:
+        return False
+    if move_up and now_pos >= max_angle - 1:
+        return True
+    if not move_up and now_pos <= min_angle + 1:
+        return True
+    return False
+
+
+def _shoulder_guard_blocked(direction: str) -> bool:
+    blocked = _update_lvc_state()
+    if not blocked:
+        return False
+    reason = "lvc"
+    _shoulder_stop(reason)
+    event_bus.publish(
+        "shoulder_guard",
+        {
+            "state": "blocked",
+            "reason": reason,
+            "direction": direction,
+            "voltage": round(_lvc_state["ema"], 2) if _lvc_state["ema"] else None,
+            "threshold": LVC_LOWER_V,
+        },
+    )
+    return True
 
 
 def update_code():
@@ -562,15 +784,78 @@ async def recv_msg(websocket):
                 cpu_temp = info.get_cpu_tempfunc()
                 cpu_use = info.get_cpu_use()
                 ram_info = info.get_ram_info()
-                voltage = 0.0
-                percentage = 0
+                voltage_str = 'N/A'
+                percentage_str = 'N/A'
+                voltage_num = None
+                percentage_num = None
                 if battery is not None:
                     try:
-                        voltage = round(battery.read_voltage(), 2)
-                        percentage = battery.read_percentage()
+                        voltage_value = battery.read_voltage()
+                        if voltage_value is not None:
+                            voltage_num = float(voltage_value)
+                            voltage_str = f"{voltage_num:.2f}"
+                        percentage_value = battery.read_percentage()
+                        if percentage_value is not None:
+                            percentage_num = float(percentage_value)
+                            percentage_str = f"{int(round(percentage_num))}"
                     except Exception as exc:
                         logger.warning({"evt": "battery_read_error", "error": str(exc)})
-                response['data'] = [cpu_temp, cpu_use, ram_info, voltage, percentage]
+
+                gyro_values = ["N/A", "N/A", "N/A"]
+                accel_values = ["N/A", "N/A", "N/A"]
+                imu_reading = None
+                try:
+                    imu_reading = imu_sensor.sample()
+                except Exception as exc:
+                    logger.warning({"evt": "imu_sample_exception", "error": str(exc)})
+                if imu_reading and isinstance(imu_reading, dict):
+                    gyro_data = imu_reading.get("gyro") or {}
+                    gyro_updated = []
+                    accel_updated = []
+                    for axis in ("x", "y", "z"):
+                        try:
+                            gyro_updated.append(f"{float(gyro_data.get(axis, 0.0)):.2f}")
+                        except Exception:
+                            gyro_updated.append("N/A")
+                        accel_axis = (imu_reading.get("accel") or {}).get(axis)
+                        try:
+                            accel_updated.append(f"{float(accel_axis):.3f}")
+                        except Exception:
+                            accel_updated.append("N/A")
+                    if gyro_updated:
+                        gyro_values = gyro_updated
+                    if accel_updated:
+                        accel_values = accel_updated
+
+                response['data'] = [
+                    cpu_temp,
+                    cpu_use,
+                    ram_info,
+                    voltage_str,
+                    percentage_str,
+                    gyro_values[0],
+                    gyro_values[1],
+                    gyro_values[2],
+                    accel_values[0],
+                    accel_values[1],
+                    accel_values[2],
+                ]
+                response['gyro'] = {
+                    "x": gyro_values[0],
+                    "y": gyro_values[1],
+                    "z": gyro_values[2],
+                }
+                response['battery'] = {
+                    "voltage": voltage_num,
+                    "voltage_display": voltage_str,
+                    "percentage": percentage_num,
+                    "percentage_display": percentage_str,
+                }
+                response['accel'] = {
+                    "x": accel_values[0],
+                    "y": accel_values[1],
+                    "z": accel_values[2],
+                }
                 handled_locally = True
 
             elif data.startswith('wsB'):

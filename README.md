@@ -40,6 +40,10 @@ The project now ships with a two-container stack: the application (`rasptank2`) 
 | `BATTERY_ADC_CHANNEL` | `0` | ADS7830 channel index for voltage sensing. |
 | `BATTERY_CAL_FACTOR / BATTERY_CAL_OFFSET` | `1.0 / 0.0` | Manual calibration overrides. |
 | `LOG_LEVEL` | `INFO` | Python logging threshold (`DEBUG`, `INFO`, …). |
+| `SHOULDER_LVC_LOWER` | `6.0` | Lower voltage cutoff (V) to disable arm commands (only used when guard enabled). |
+| `SHOULDER_LVC_UPPER` | `6.2` | Release threshold after low-voltage lockout. |
+| `SHOULDER_LVC_ALPHA` | `0.2` | EMA smoothing factor for low-voltage guard. |
+| `SHOULDER_LVC_DISABLE` | `1` | Guard is off by default; set to `0` to enforce low-voltage lockout. |
 
 All variables can be provided via `.env` or the compose file.
 
