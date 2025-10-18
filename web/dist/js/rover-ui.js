@@ -11,6 +11,7 @@
     cpuTemp: document.getElementById('cpu-temp'),
     ramUsage: document.getElementById('ram-usage'),
     speedValue: document.getElementById('speed-value'),
+    connectionQuality: document.getElementById('connection-quality'),
     gyro: {
       x: document.getElementById('gyro-x'),
       y: document.getElementById('gyro-y'),
@@ -58,6 +59,9 @@
     batteryMeta: { scale: 8.4 },
     speed: parseInt(elements.speedSlider?.value || '100', 10),
     speedDebounce: null,
+    connectionQualityClass: 'text-white/70',
+    lastInfoReceived: null,
+    qualityInterval: null,
     actionStates: Object.create(null),
     cvflActive: false,
     cvflColorOn: true,
@@ -108,6 +112,8 @@
     [3.05, 1],
     [3.00, 0]
   ];
+
+  const QUALITY_DEFAULT_CLASS = 'text-white/70';
 
   function smoothVoltage (value) {
     if (!Number.isFinite(value)) {
@@ -181,6 +187,7 @@ function voltageToPercent (voltage) {
     setupUtilities();
     setupCalibration();
     setupWebSocket();
+    setupConnectionQualityMonitor();
     startInfoPolling();
     updateConnection(false);
   }
@@ -680,6 +687,7 @@ function voltageToPercent (voltage) {
       state.ws = ws;
 
       ws.addEventListener('open', () => {
+        state.lastInfoReceived = null;
         updateConnection(true);
         sendRaw('admin:123456');
       });
@@ -689,6 +697,7 @@ function voltageToPercent (voltage) {
       });
 
       ws.addEventListener('close', () => {
+        state.lastInfoReceived = null;
         updateConnection(false);
         scheduleReconnect();
       });
@@ -718,6 +727,7 @@ function voltageToPercent (voltage) {
       elements.connectionLabel.textContent = 'Disconnected';
       elements.reconnectButton?.classList.remove('hidden');
     }
+    updateConnectionQuality();
   }
 
   function scheduleReconnect () {
@@ -738,6 +748,8 @@ function voltageToPercent (voltage) {
     }
     if (payload?.title === 'get_info') {
       applyStats(payload);
+      state.lastInfoReceived = Date.now();
+      updateConnectionQuality();
     }
   }
 
@@ -832,6 +844,52 @@ function voltageToPercent (voltage) {
     if (history.length > 60) history.shift();
     chart.data.datasets[0].data = [...history];
     chart.update('none');
+  }
+
+  function setupConnectionQualityMonitor () {
+    updateConnectionQuality();
+    if (state.qualityInterval) {
+      window.clearInterval(state.qualityInterval);
+    }
+    state.qualityInterval = window.setInterval(updateConnectionQuality, 2000);
+  }
+
+  function updateConnectionQuality () {
+    const el = elements.connectionQuality;
+    if (!el) return;
+    let label = '--';
+    let nextClass = QUALITY_DEFAULT_CLASS;
+
+    if (!state.connected) {
+      label = 'Offline';
+      nextClass = 'text-red-400';
+    } else if (!state.lastInfoReceived) {
+      label = 'Connecting';
+    } else {
+      const age = Date.now() - state.lastInfoReceived;
+      if (age <= 6000) {
+        label = 'Excellent';
+        nextClass = 'text-green-400';
+      } else if (age <= 12000) {
+        label = 'Good';
+        nextClass = 'text-emerald-300';
+      } else if (age <= 20000) {
+        label = 'Weak';
+        nextClass = 'text-amber-300';
+      } else {
+        label = 'Degraded';
+        nextClass = 'text-red-400';
+      }
+    }
+
+    if (state.connectionQualityClass && state.connectionQualityClass !== nextClass) {
+      el.classList.remove(state.connectionQualityClass);
+    }
+    if (!el.classList.contains(nextClass)) {
+      el.classList.add(nextClass);
+    }
+    state.connectionQualityClass = nextClass;
+    el.textContent = label;
   }
 
   function startInfoPolling () {
