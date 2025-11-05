@@ -13,8 +13,8 @@ _CALIBRATION_FILE = Path(__file__).with_name("servo_calibration.json")
 _LOCK = threading.Lock()
 
 _DEFAULT_SHOULDER = {
-    "base_angle": 90,
-    "raise_angle": 60,
+    "base_angle": 0,
+    "raise_angle": 180,
 }
 
 _current = {
@@ -31,13 +31,22 @@ def _ensure_loaded() -> None:
             data = json.loads(_CALIBRATION_FILE.read_text())
         except (ValueError, OSError):
             return
+        changed = False
         shoulder = data.get("shoulder")
         if isinstance(shoulder, dict):
             for key in ("base_angle", "raise_angle"):
                 value = shoulder.get(key)
                 if isinstance(value, (int, float)):
                     _current["shoulder"][key] = float(value)
+        if (
+            _current["shoulder"].get("base_angle") == 90
+            and _current["shoulder"].get("raise_angle") == 60
+        ):
+            _current["shoulder"] = dict(_DEFAULT_SHOULDER)
+            changed = True
         if _drop_legacy_fields():
+            changed = True
+        if changed:
             _serialize()
 
 

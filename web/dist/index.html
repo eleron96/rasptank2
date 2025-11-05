@@ -119,6 +119,8 @@
         color: rgba(255, 255, 255, 0.85);
         font-weight: 600;
         font-size: 0.9rem;
+        user-select: none;
+        -webkit-user-select: none;
       }
       .pad-button:hover,
       .pad-button.is-active {
@@ -178,6 +180,8 @@
         background-color: rgba(50, 77, 103, 0.85);
         border: 1px solid rgba(255, 255, 255, 0.08);
         color: rgba(255, 255, 255, 0.85);
+        user-select: none;
+        -webkit-user-select: none;
       }
       .arm-button:hover,
       .arm-button.is-active {
@@ -416,7 +420,7 @@
           </label>
           <label class="flex items-center justify-between gap-4">
             <span>Raise offset (°)</span>
-            <input id="calibration-raise" type="number" min="5" max="120" class="h-10 w-24 rounded border border-white/15 bg-panel-accent px-3">
+            <input id="calibration-raise" type="number" min="5" max="180" class="h-10 w-24 rounded border border-white/15 bg-panel-accent px-3">
           </label>
           <p class="text-xs text-white/50 leading-relaxed">
             The base angle defines the neutral shoulder position. The raise offset controls how far the joint can lift above the base.

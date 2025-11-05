@@ -566,8 +566,8 @@ function voltageToPercent (voltage) {
         if (calibration) {
           state.batteryMeta = state.batteryMeta || {};
           Object.assign(state.batteryMeta, calibration);
-          elements.calibrationBase.value = Number(calibration.base_angle || 90).toFixed(0);
-          elements.calibrationRaise.value = Number(calibration.raise_angle || 45).toFixed(0);
+          elements.calibrationBase.value = Number(calibration.base_angle || 0).toFixed(0);
+          elements.calibrationRaise.value = Number(calibration.raise_angle || 180).toFixed(0);
         }
         if (batteryRes.ok) {
           const batteryData = await batteryRes.json();
@@ -644,8 +644,8 @@ function voltageToPercent (voltage) {
         elements.calibrationStatus.classList.add('text-red-400');
         return;
       }
-      if (!Number.isFinite(raise) || raise < 5 || raise > 120) {
-        elements.calibrationStatus.textContent = 'Raise angle must be between 5 and 120.';
+      if (!Number.isFinite(raise) || raise < 5 || raise > 180) {
+        elements.calibrationStatus.textContent = 'Raise angle must be between 5 and 180.';
         elements.calibrationStatus.classList.add('text-red-400');
         return;
       }

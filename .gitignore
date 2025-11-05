@@ -1,0 +1,11 @@
+# Python bytecode caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Tool-specific cache directories
+.pytest_cache/
+.cache/
+
+# macOS Finder artifacts
+.DS_Store

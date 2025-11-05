@@ -97,8 +97,8 @@ def _clamp_angle(value, minimum=0, maximum=180):
 
 
 _shoulder_calibration = {
-    "base_angle": 90.0,
-    "raise_angle": 45.0,
+    "base_angle": 0.0,
+    "raise_angle": 180.0,
 }
 
 
@@ -106,9 +106,9 @@ def _apply_shoulder_calibration(calibration):
     global _shoulder_calibration
     if not isinstance(calibration, dict):
         return
-    base = _clamp_angle(float(calibration.get("base_angle", 90.0)))
-    span = _clamp_angle(float(calibration.get("raise_angle", 60.0)))
-    span = max(5.0, min(span, 60.0))
+    base = _clamp_angle(float(calibration.get("base_angle", 0.0)))
+    span = _clamp_angle(float(calibration.get("raise_angle", 180.0)))
+    span = max(5.0, min(span, 180.0))
 
     lower_angle = max(0.0, base - span)
     upper_angle = min(180.0, base + span)

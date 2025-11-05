@@ -82,7 +82,7 @@
           </div>
           <div class="settings-modal__field">
             <label for="${MODAL_ID}-raise">Угол подъёма (°)</label>
-            <input type="number" min="5" max="120" step="1" id="${MODAL_ID}-raise" autocomplete="off" inputmode="decimal" />
+            <input type="number" min="5" max="180" step="1" id="${MODAL_ID}-raise" autocomplete="off" inputmode="decimal" />
           </div>
           <div class="settings-modal__hint">
             Базовый угол — абсолютное положение сервопривода. Значение «подъём» задаёт дополнительный ход вверх от базового положения.
@@ -181,8 +181,8 @@
       if (base < 0 || base > 180) {
         return { ok: false, message: "Базовый угол должен быть в диапазоне 0-180°." };
       }
-      if (raise < 5 || raise > 120) {
-        return { ok: false, message: "Угол подъёма должен быть в диапазоне 5-120°." };
+      if (raise < 5 || raise > 180) {
+        return { ok: false, message: "Угол подъёма должен быть в диапазоне 5-180°." };
       }
       return { ok: true, base, raise };
     };
