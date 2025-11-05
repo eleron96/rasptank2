@@ -9,3 +9,10 @@ __pycache__/
 
 # macOS Finder artifacts
 .DS_Store
+
+# JetBrains IDE project files
+.idea/
+*.iml
+*.iws
+*.ipr
+*.dea
