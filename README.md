@@ -110,6 +110,13 @@ This repository hosts the control software for the RaspTank2 tracked rover: Web 
 
 Provide these through `.env`, `docker-compose.yml`, or the shell environment prior to launching the server.
 
+## Camera Setup
+- Default backend: `picamera2` (libcamera stack) via `web/camera_opencv.py`, streaming MJPEG frames through the Flask server. Install `python3-picamera2` on Raspberry Pi OS or the PyPI `picamera2` wheel alongside the `libcamera` firmware packages.
+- Supported sensors: IMX219, IMX477, and other CSI modules auto-detect when `CAMERA_BACKEND=auto` (default) or when explicitly set to `picamera2`. Reseat the ribbon cable and enable the Camera interface in `raspi-config` if detection fails.
+- USB cameras: set `CAMERA_BACKEND=opencv` to open `/dev/video*` through OpenCV `VideoCapture`. Adjust resolution and FPS in `web/camera_opencv.py` when necessary.
+- Headless development: set `CAMERA_BACKEND=mock` to return placeholder frames without physical hardware.
+- Performance tips: allocate at least 128 MB of GPU memory, close unused video streams, and tune frame size in `camera_opencv.py` for smoother WebSocket control.
+
 ## Pinout and Wiring
 ### Power and communication buses
 - Connect Robot HAT V3.1 5V and GND to the Raspberry Pi 5V (pin 2 or 4) and GND (pin 6 or 9).
@@ -150,9 +157,6 @@ Provide these through `.env`, `docker-compose.yml`, or the shell environment pri
 | Auxiliary LED 2 | GPIO25 (pin 22) | Managed by `switch.switch(2, ...)`. |
 | Auxiliary LED 3 | GPIO11 (pin 23) | Managed by `switch.switch(3, ...)`. |
 | IMU (if present) | I2C bus | Supported through `imu_sensor.py`. |
-
-### Camera
-- CSI ribbon cable connects to the Raspberry Pi camera port. Picamera2 auto-detects IMX219/IMX477 modules; set `CAMERA_BACKEND=opencv` if you use a USB camera on `/dev/video0`.
 
 ## Usage
 - **Docker**: `docker compose logs -f rasptank2` to watch events, `docker compose stop` to halt, `docker compose down` to tear down the stack.
