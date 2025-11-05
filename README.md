@@ -1,104 +1,166 @@
-# Adeept RaspTank-V4 Smart Car Kit for Raspberry Pi
-Adeept RaspTank is an open source intelligent robotics product for artificial intelligence, robotics enthusiasts and students. This product is based on the Raspberry Pi motherboard using the python language and is compatible with the following Raspberry Pi models: 3B,3B+,4,5, etc.
+# RaspTank2 Control Stack
 
-## Resources Links
+This repository hosts the control software for the RaspTank2 tracked rover: Web UI, WebSocket command server, video streaming, drive train control, robotic arm, and telemetry. The implementation started from the open-source Adeept RaspTank-V4 release and has since been substantially redesigned; everything described below reflects the current custom code base.
 
-[RobotName]: Adeept RaspTank-V4 \
-[Item Code]: ADR013-V4 \
-[Official Raspberry Pi website]: https://www.raspberrypi.org/downloads/    \
-[Official website]:  https://www.adeept.com/     \
-[GitHub]: https://github.com/adeept/adeept_rasptank2/     
+## Overview
+- Runs on Raspberry Pi 3B/3B+/4/5 paired with the Adeept Robot HAT V3.1 (PCA9685 + TB6612) and the bundled sensors.
+- Serves a browser UI (Vue + Vuetify) with live video, telemetry charts, arm presets, and calibration dialogs.
+- Exposes a WebSocket control channel on port 8888 plus REST/SSE endpoints for automation and battery calibration.
+- Adds servo safety guards, ADS7830 battery monitoring with smoothing, and optional WS2812 lighting effects.
 
+## Libraries Used
+### System packages
+- `python3-gpiozero`, `python3-pigpio` for GPIO access and PWM bridging.
+- `python3-picamera2`, `python3-opencv`, `opencv-data` for camera streaming and computer vision helpers.
+- `python3-pyaudio` for audio capture.
+- `python3-pyqt5`, `python3-opengl` to satisfy Picamera2 preview dependencies on some Raspberry Pi OS builds.
+- Networking utilities for the optional access-point mode: `util-linux`, `procps`, `hostapd`, `iproute2`, `iw`, `haveged`, `dnsmasq`, plus `create_ap`.
 
-## Docker Compose Deployment
+### Python packages
+- `flask`, `flask-cors`, `websockets`, `pyzmq`, `imutils`, `pybase64`, `psutil`, `numpy`.
+- Adafruit CircuitPython drivers: `adafruit-circuitpython-motor`, `adafruit-circuitpython-pca9685`, `adafruit-circuitpython-ads7830`, and the BlinkA compatibility layer.
+- `rpi_ws281x` for addressable LEDs, `gpiozero` for high-level GPIO helpers.
+- `picamera2` (PyPI variant) and `opencv-python` when not using the Debian packages.
 
-The project now ships with a two-container stack: the application (`rasptank2`) and an nginx reverse proxy that exposes everything on port 80 while tunnelling WebSocket traffic via `/ws`.
+### Front-end
+- Vue 3, Vuetify, and Chart.js (pre-built into `web/dist`) power the browser interface.
 
-1. Copy the repo to your Raspberry Pi (see `make sync`).
-2. Run `docker compose up -d --build` in the project root. The compose file automatically:
-   - builds the `rasptank2:latest` image,
-   - maps `/dev/i2c-1` and `/dev/gpiomem`,
-   - injects `PCA9685_ADDR`/`BLINKA_FORCE*`/`SERVO_RELAX` environment variables,
-   - enables an automatic camera backend (`CAMERA_BACKEND=auto`) that tries Picamera2 first and falls back to OpenCV `/dev/video0`,
-   - brings up nginx with the supplied `nginx.conf`.
-3. Open `http://<pi-ip>/` for the UI. The browser will connect to the WebSocket endpoint at `ws(s)://<pi-ip>/ws`.
+## Installation
+### 1. Prepare the Raspberry Pi
+- Flash Raspberry Pi OS (64-bit, Bookworm or newer), boot, and update:  
+  `sudo apt update && sudo apt full-upgrade -y`
+- Enable interfaces: run `sudo raspi-config`, enable **Camera**, **I2C**, and **SPI**, then reboot.
+- (Optional) enable the legacy camera stack only if you rely on older CSI modules.
 
-`make run`/`make restart` are thin wrappers around `docker compose` and handle both containers. Logs from servo arm/gripper actions are streamed to `docker compose logs`.
+### Option A: Docker Compose (recommended for quick deployment)
+1. Install Docker Engine and the Compose plugin:
+   ```bash
+   curl -fsSL https://get.docker.com | sh
+   sudo usermod -aG docker $USER
+   ```
+   Log out/in after adding yourself to the `docker` group.
+2. Clone the repository:
+   ```bash
+   git clone https://github.com/your-account/rasptank2.git
+   cd rasptank2
+   ```
+3. Review `.env.example` (create `.env` if you need to override defaults such as `PCA9685_ADDR`, `CAMERA_BACKEND`, or `SERVO_RELAX`).
+4. Build and start the stack:
+   ```bash
+   docker compose up -d --build
+   ```
+   The Compose file mounts `/dev/i2c-1` and `/dev/gpiomem`, configures camera autodetection, and starts the Nginx reverse proxy on port 80.
+5. Open `http://<pi-ip>/` in a browser. The UI will upgrade to WebSocket `ws://<pi-ip>/ws` automatically.
+6. Inspect logs when needed: `docker compose logs -f rasptank2` and `docker compose logs -f nginx`.
 
-### Environment Variables
+### Option B: Native installation (runs directly on Raspberry Pi OS)
+1. Install OS-level dependencies:
+   ```bash
+   sudo apt update
+   sudo apt install -y python3-gpiozero python3-pigpio python3-opencv python3-picamera2 \
+       python3-pyaudio python3-pyqt5 python3-opengl opencv-data \
+       util-linux procps hostapd iproute2 iw haveged dnsmasq git
+   ```
+   If you plan to use the access-point helper, also run:
+   ```bash
+   git clone https://github.com/oblique/create_ap ~/create_ap
+   cd ~/create_ap && sudo make install
+   ```
+2. (Optional but recommended) create a virtual environment:
+   ```bash
+   python3 -m venv ~/.venvs/rasptank2
+   source ~/.venvs/rasptank2/bin/activate
+   python -m pip install --upgrade pip
+   ```
+3. Install Python dependencies (use `--break-system-packages` on Debian Bookworm if you stay outside a venv):
+   ```bash
+   pip install flask flask-cors websockets pyzmq imutils numpy pybase64 psutil \
+       adafruit-circuitpython-motor adafruit-circuitpython-pca9685 adafruit-circuitpython-ads7830 \
+       rpi_ws281x gpiozero picamera2 opencv-python
+   ```
+4. Clone and enter the project:
+   ```bash
+   git clone https://github.com/your-account/rasptank2.git
+   cd rasptank2
+   ```
+5. Start the server:
+   ```bash
+   python3 web/webServer.py
+   ```
+   The script launches the Flask video backend on port 5000 and the WebSocket interface on port 8888.
+6. Browse to `http://<pi-ip>:5000/` for the direct Flask UI or use the SPA at `http://<pi-ip>:5000/index.html`. The WebSocket controller will connect automatically.
 
-| Variable | Default | Purpose |
+## Environment Variables
+| Variable | Default | Description |
 | --- | --- | --- |
-| `PCA9685_ADDR` | `0x5F` | I²C address for the PCA9685 servo driver. |
-| `PWM_LED_CHANNEL` | `5` | PCA9685 channel dedicated to the headlight LED (0‑based). |
-| `PWM_LED_FREQ` | `50` | PWM frequency used for the LED driver fallback. |
-| `SERVO_RELAX` | `1` | Relax servos when idle (`0` keeps torque applied). |
-| `ARM_SERVO_SPEED` | `10` | Default shoulder servo wiggle speed (1–10). |
-| `CAMERA_BACKEND` | `auto` | Camera selection (`picamera2`, `opencv`, `mock`). |
-| `BATTERY_VOLT_MIN` | `6.0` | Voltage treated as 0 % in battery gauge. |
-| `BATTERY_VOLT_MAX` | `8.4` | Voltage treated as 100 % in battery gauge. |
-| `BATTERY_ADC_CHANNEL` | `0` | ADS7830 channel index for voltage sensing. |
-| `BATTERY_CAL_FACTOR / BATTERY_CAL_OFFSET` | `1.0 / 0.0` | Manual calibration overrides. |
-| `LOG_LEVEL` | `INFO` | Python logging threshold (`DEBUG`, `INFO`, …). |
-| `SHOULDER_LVC_LOWER` | `6.0` | Lower voltage cutoff (V) to disable arm commands (only used when guard enabled). |
-| `SHOULDER_LVC_UPPER` | `6.2` | Release threshold after low-voltage lockout. |
-| `SHOULDER_LVC_ALPHA` | `0.2` | EMA smoothing factor for low-voltage guard. |
-| `SHOULDER_LVC_DISABLE` | `1` | Guard is off by default; set to `0` to enforce low-voltage lockout. |
+| `PCA9685_ADDR` | `0x5F` | I2C address of the servo driver (Robot HAT jumpers A0-A2 high). |
+| `PWM_LED_CHANNEL` | `5` | PCA9685 channel used for the headlight LED. |
+| `PWM_LED_FREQ` | `50` | PWM frequency for the LED helper. |
+| `SERVO_RELAX` | `1` | Release torque automatically when servos idle (`0` keeps holding torque). |
+| `ARM_SERVO_SPEED` | `10` | Default shoulder servo travel speed (1-10). |
+| `CAMERA_BACKEND` | `auto` | `picamera2`, `opencv`, or `mock` selection. |
+| `BATTERY_VOLT_MIN` | `6.0` | Voltage mapped to 0% for the battery gauge. |
+| `BATTERY_VOLT_MAX` | `8.4` | Voltage mapped to 100% (2S Li-ion). |
+| `BATTERY_ADC_CHANNEL` | `0` | ADS7830 channel wired to the battery divider. |
+| `BATTERY_CAL_FACTOR` / `BATTERY_CAL_OFFSET` | `1.0` / `0.0` | Manual overrides for calibration math. |
+| `LOG_LEVEL` | `INFO` | Python logging threshold. |
+| `SHOULDER_LVC_DISABLE` | `1` | Set to `0` to enable the low-voltage shoulder guard. |
+| `SHOULDER_LVC_LOWER` / `SHOULDER_LVC_UPPER` | `6.0` / `6.2` | Voltage window to block/release shoulder motion. |
+| `SHOULDER_LVC_ALPHA` | `0.2` | Smoothing factor for voltage EMA. |
 
-All variables can be provided via `.env` or the compose file.
+Provide these through `.env`, `docker-compose.yml`, or the shell environment prior to launching the server.
 
-### Service Ports and Streams
+## Pinout and Wiring
+### Power and communication buses
+- Connect Robot HAT V3.1 5V and GND to the Raspberry Pi 5V (pin 2 or 4) and GND (pin 6 or 9).
+- PCA9685 logic (VCC) must be tied to Pi 3.3V (pin 1). Servos draw power from the HAT V+ rail (external 6-7.4 V battery).
+- I2C bus: SDA to GPIO2 (pin 3), SCL to GPIO3 (pin 5). Ensure the `PCA9685_ADDR` jumpers remain at `0x5F` unless you override the environment variable.
+- ADS7830 battery monitor shares the same I2C bus at address `0x48`.
 
-| Path/Port | Protocol | Description |
+### DC motors (tracks)
+| Robot HAT port | PCA9685 channels | Suggested motor | Notes |
+| --- | --- | --- | --- |
+| M1 | IN1=15, IN2=14 | Left track front | Swap motor leads if forward/backward is inverted. |
+| M2 | IN1=12, IN2=13 | Left track rear | Shares left track direction with M1. |
+| M3 | IN1=11, IN2=10 | Right track front | Channels 11/10 drive the right side. |
+| M4 | IN1=8, IN2=9 | Right track rear | Mirrors M3; swap leads to correct direction. |
+
+### Servos on PCA9685
+| Channel | Function | Notes |
 | --- | --- | --- |
-| `:80/` | HTTP | Vue-based control UI served by nginx. |
-| `:80/ws` | WebSocket | Control channel proxied to the Python `webServer.py` (`8888`). |
-| `:80/api/events` | SSE | Server-sent events for telemetry (battery, calibration). |
-| `:80/api/calibration` | REST | Battery calibration GET/POST (ETag-aware). |
-| `:80/video_feed` | MJPEG | Camera stream. |
+| 0 | Shoulder lift servo | Guarded by low-voltage lockout. |
+| 1 | Wrist pitch servo (arm up/down fine control) | Referred to as `hand` in the UI. |
+| 2 | Arm yaw (rotate left/right) | Used by `lookleft`/`lookright` commands. |
+| 3 | Gripper open/close | Triggered by `grab`/`loose`. |
+| 4 | Camera tilt | `up`/`down` commands. |
+| 5 | Headlight LED via `pwm_led` helper | Optional; can be reassigned. |
+| 6-7 | Spare | Free for custom attachments; update code if used. |
 
-### Diagnostics & Lag Checks
+### Sensors and auxiliary GPIO
+| Component | Pi GPIO (BCM) | Notes |
+| --- | --- | --- |
+| HC-SR04 trigger | GPIO23 (pin 16) | Use 5V supply with a voltage divider on echo. |
+| HC-SR04 echo | GPIO24 (pin 18) | Ensure 3.3 V safe input. |
+| Line tracker left | GPIO22 (pin 15) | Active-low digital input. |
+| Line tracker middle | GPIO27 (pin 13) | Active-low digital input. |
+| Line tracker right | GPIO17 (pin 11) | Active-low digital input. |
+| Buzzer | GPIO18 (pin 12) | PWM capable; controlled via `BUZZER_GPIO`. |
+| WS2812 LED chain | GPIO12 (pin 32) | Data line; power LEDs from the battery rail. |
+| Auxiliary LED 1 | GPIO9 (pin 21) | Managed by `switch.switch(1, ...)`. |
+| Auxiliary LED 2 | GPIO25 (pin 22) | Managed by `switch.switch(2, ...)`. |
+| Auxiliary LED 3 | GPIO11 (pin 23) | Managed by `switch.switch(3, ...)`. |
+| IMU (if present) | I2C bus | Supported through `imu_sensor.py`. |
 
-- **Power first** – verify the battery reports ≥ 7 V in the UI or via `curl -H "Accept: application/json" http://<pi>/api/calibration`.
-- **Servo bus** – ensure the shoulder servo sits on PCA9685 channel 0–7 and that `PCA9685_ADDR` matches the jumper setting.
-- **Throttle logging noise** – set `LOG_LEVEL=DEBUG` temporarily to capture structured events like `{"evt": "command_queue", ...}`. Return to `INFO` after diagnosis.
-- **Disable video** – comment out `/video_feed` in the UI or stop the camera service if you suspect USB bandwidth issues; command processing now runs in a dedicated executor and should stay responsive.
-- **Network** – monitor `/api/events` (SSE) with `curl -N http://<pi>/api/events` to ensure updates arrive without stalling.
+### Camera
+- CSI ribbon cable connects to the Raspberry Pi camera port. Picamera2 auto-detects IMX219/IMX477 modules; set `CAMERA_BACKEND=opencv` if you use a USB camera on `/dev/video0`.
 
-### Updating Without Downtime
+## Usage
+- **Docker**: `docker compose logs -f rasptank2` to watch events, `docker compose stop` to halt, `docker compose down` to tear down the stack.
+- **Native**: Run `python3 web/webServer.py` inside a terminal or configure `systemd` to launch at boot. Stop with `Ctrl+C`. Optionally enable `pigpiod` via `sudo systemctl enable --now pigpiod`.
+- The UI exposes calibration modals (battery, shoulder). After changing battery calibration, the values persist in `web/servo_calibration.json`.
+- WebSocket API clients must authenticate with the default `admin:123456` string; update the logic in `web/webServer.py` if you require custom credentials.
 
-1. Pull new images: `docker compose pull`.
-2. Rebuild the app if required: `docker compose build rasptank2`.
-3. Deploy seamlessly: `docker compose up -d` (only refreshed containers restart).
-4. Validate: `docker compose ps` and `docker compose logs -f rasptank2` for the structured `{"evt": "startup"}` entry.
-
-The nginx proxy remains up while the application container restarts, keeping WebSocket/SSE connections retrying automatically.
-
-
-## Getting Support or Providing Advice
-
-Adeept provides free and responsive product and technical support, including but not limited to:   
-* Product quality issues 
-* Product use and build issues
-* Questions regarding the technology employed in our products for learning and education
-* Your input and opinions are always welcome
-
-We also encourage your ideas and suggestions for new products and product improvements
-For any of the above, you may send us an email to:     \
-Technical support: support@adeept.com      \
-Customer Service: service@adeept.com
-
-
-## About Adeept
-
-Adeept was founded in 2015 and is a company dedicated to open source hardware and STEM education services. The Adeept technical team continuously develops new technologies, uses excellent products as technology and service carriers, and provides comprehensive tutorials and after-sales technical support to help users combine learning with entertainment. The main products include various learning kits and robots for Arduino, Raspberry Pi, ESP32 and BBC micro:bit.    \
-Adeept is committed to assist customers in their education of robotics, programming and electronic circuits so that they may transform their creative ideas into prototypes and new and innovative products. To this end, our services include but are not limited to:   
-* Educational and Entertaining Project Kits for Robots, Smart Cars and Drones
-* Educational Kits to Learn Robotic Software Systems for Arduino, Raspberry Pi and micro: bit
-* Electronic Component Assortments, Electronic Modules and Specialized Tools
-* Product Development and Customization Services
-
-
-## Copyright
-
-Adeept brand and logo are copyright of Shenzhen Adeept Technology Co., Ltd. and cannot be used without written permission.
+## Next Steps
+- Add your own automation routines by extending `web/functions.py`.
+- Tweak servo limits in `web/webServer.py` and `web/RPIservo.py` to match your mechanical setup.
+- Use `make sync` or your preferred deployment tooling to push updates to the robot.
