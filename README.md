@@ -103,7 +103,7 @@ This repository hosts the control software for the RaspTank2 tracked rover: Web 
 | `BATTERY_VOLT_MAX` | `8.4` | Voltage mapped to 100% (2S Li-ion). |
 | `BATTERY_ADC_CHANNEL` | `0` | ADS7830 channel wired to the battery divider. |
 | `BATTERY_CAL_FACTOR` / `BATTERY_CAL_OFFSET` | `1.0` / `0.0` | Manual overrides for calibration math. |
-| `WS2812_DRIVER` | `auto` | `spi` (Robot HAT V3.1 port), `pwm`, or auto-detect fallback. |
+| `WS2812_DRIVER` | `auto` | `spi` (new SPI bitstream driver), `pwm` (legacy RobotWS2812), or auto-detect fallback. |
 | `WS2812_LED_COUNT` | `16` | Total number of WS2812 pixels (built-in + external strip). |
 | `WS2812_BRIGHTNESS` | `255` | SPI strip brightness (0-255). |
 | `WS2812_ALLOW_PI5` | `0` | Set to `1` to bypass the Pi 5 safety check and try driving WS2812 over SPI anyway. |
@@ -162,7 +162,7 @@ Provide these through `.env`, `docker-compose.yml`, or the shell environment pri
 | Auxiliary LED 3 | GPIO11 (pin 23) | Managed by `switch.switch(3, ...)`. |
 | IMU (if present) | I2C bus | Supported through `imu_sensor.py`. |
 
-> **WS2812 wiring:** The Robot HAT V3.1 routes the WS2812 connector to SPI MOSI (GPIO10). Enable SPI in `raspi-config`, feed the strip with 5 V and shared GND, and chain `OUT` of each section to the next `IN`. The two pixels soldered to the HAT occupy indexes 0 and 1, so external LEDs start at index 2.
+> **WS2812 wiring:** The Robot HAT V3.1 routes the WS2812 connector to SPI MOSI (GPIO10). Enable SPI in `raspi-config`, feed the strip with 5 V and shared GND, and chain `OUT` of each section to the next `IN`. The two pixels soldered to the HAT occupy indexes 0 and 1, so external LEDs start at index 2. When `WS2812_DRIVER=spi`, the new `ws2812_spi` backend drives the strip directly over `/dev/spidev0.0`, which is compatible with Raspberry Pi 5.
 
 ## Usage
 - **Docker**: `docker compose logs -f rasptank2` to watch events, `docker compose stop` to halt, `docker compose down` to tear down the stack.

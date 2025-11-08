@@ -18,6 +18,7 @@ import RPIservo
 
 import functions
 import robotLight
+import ws2812_spi
 import switch
 import buzzer
 import pwm_led
@@ -229,13 +230,6 @@ def _initialize_ws2812_driver(force: bool = False) -> bool:
 
         try:
             robotlight_check = robotLight.check_rpi_model()
-            if robotlight_check == 5 and not WS2812_ALLOW_PI5:
-                logger.warning({"evt": "ws2812_unsupported_pi5"})
-                WS2812 = None
-                WS2812_mark = 0
-                state.update({"checked": True, "supported": False, "reason": "unsupported_pi5", "driver": None})
-                return False
-
             driver_pref = (WS2812_DRIVER or "auto").strip().lower()
             driver_queue = []
             if driver_pref in ("auto", "spi"):
@@ -245,18 +239,30 @@ def _initialize_ws2812_driver(force: bool = False) -> bool:
             if not driver_queue:
                 driver_queue.extend(["spi", "pwm"])
 
+            if robotlight_check == 5 and not WS2812_ALLOW_PI5 and "spi" not in driver_queue:
+                logger.warning({"evt": "ws2812_unsupported_pi5"})
+                WS2812 = None
+                WS2812_mark = 0
+                state.update({"checked": True, "supported": False, "reason": "unsupported_pi5", "driver": None})
+                return False
+
             last_error = None
             for driver in driver_queue:
                 try:
                     if driver == "spi":
-                        candidate = robotLight.Adeept_SPI_LedPixel(WS2812_LED_COUNT, WS2812_BRIGHTNESS)
-                        if candidate.check_spi_state() == 0:
-                            candidate.led_close()
-                            raise RuntimeError("WS2812 SPI init failed (check /dev/spidev*)")
+                        candidate = ws2812_spi.WS2812SPI(
+                            count=WS2812_LED_COUNT,
+                            brightness=WS2812_BRIGHTNESS,
+                        )
+                        candidate.start()
+                        candidate.setColor(70, 70, 255)
                     else:
                         candidate = robotLight.RobotWS2812()
-                    candidate.start()
-                    candidate.breath(70, 70, 255)
+                        candidate.start()
+                        if hasattr(candidate, "breath"):
+                            candidate.breath(70, 70, 255)
+                        else:
+                            candidate.setColor(70, 70, 255)
                     WS2812 = candidate
                     WS2812_mark = 1
                     logger.info({"evt": "ws2812_init", "driver": driver})
