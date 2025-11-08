@@ -251,7 +251,7 @@ class ServoCtrl(threading.Thread):
         self.pause()
 
     def initConfig(self, ID, initInput, moveTo):
-        if initInput > self.minPos[ID] and initInput < self.maxPos[ID]:
+        if self.minPos[ID] <= initInput <= self.maxPos[ID]:
             self.initPos[ID] = initInput
             if moveTo:
                 self.set_angle(ID, self.initPos[ID])

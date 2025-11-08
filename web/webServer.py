@@ -7,6 +7,7 @@
 import time
 import threading
 import logging
+import math
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 import move
@@ -23,6 +24,7 @@ import pwm_led
 import battery_monitor
 import servo_calibration
 import socket
+import ultra
 from events import event_bus
 from pca9685_driver import angle_to_us
 
@@ -47,8 +49,25 @@ LVC_DISABLED = os.getenv("SHOULDER_LVC_DISABLE", "1").strip() in ("1", "true", "
 LVC_LOWER_V = float(os.getenv("SHOULDER_LVC_LOWER", "6.0"))
 LVC_UPPER_V = float(os.getenv("SHOULDER_LVC_UPPER", "6.2"))
 LVC_EMA_ALPHA = float(os.getenv("SHOULDER_LVC_ALPHA", "0.2"))
+WS2812_DRIVER = os.getenv("WS2812_DRIVER", "auto").strip().lower()
+WS2812_LED_COUNT = int(os.getenv("WS2812_LED_COUNT", "16"))
+WS2812_BRIGHTNESS = int(os.getenv("WS2812_BRIGHTNESS", "255"))
+WS2812_ALLOW_PI5 = os.getenv("WS2812_ALLOW_PI5", "0").strip().lower() in ("1", "true", "on", "yes")
 
 logger = logging.getLogger("rasptank")
+
+WS2812 = None
+WS2812_mark = None
+_WS2812_INIT_LOCK = threading.Lock()
+_WS2812_STATUS = {
+    "checked": False,
+    "supported": False,
+    "reason": None,
+    "driver": None,
+}
+
+_distance_lock = threading.Lock()
+_distance_state = {"value": None, "timestamp": 0.0}
 
 _COMMAND_EXECUTOR = ThreadPoolExecutor(max_workers=1)
 _shoulder_state = {
@@ -144,10 +163,6 @@ def _apply_shoulder_calibration(calibration):
         logger.error({"evt": "shoulder_calibration_error", "error": str(exc)})
 
 
-servo_calibration.register_shoulder_observer(_apply_shoulder_calibration)
-_apply_shoulder_calibration(servo_calibration.get_shoulder_calibration())
-
-
 # modeSelect = 'none'
 modeSelect = 'PT'
 
@@ -195,6 +210,195 @@ def log_led_action(action, **extra):
     payload = {"evt": "led_action", "action": action}
     payload.update(extra)
     logger.info(payload)
+
+
+def _initialize_ws2812_driver(force: bool = False) -> bool:
+    global WS2812, WS2812_mark
+    state = _WS2812_STATUS
+    if state["checked"] and not state["supported"] and not force:
+        return False
+    if WS2812 is not None and WS2812_mark == 1 and not force:
+        return True
+
+    with _WS2812_INIT_LOCK:
+        state = _WS2812_STATUS
+        if state["checked"] and not state["supported"] and not force:
+            return False
+        if WS2812 is not None and WS2812_mark == 1 and not force:
+            return True
+
+        try:
+            robotlight_check = robotLight.check_rpi_model()
+            if robotlight_check == 5 and not WS2812_ALLOW_PI5:
+                logger.warning({"evt": "ws2812_unsupported_pi5"})
+                WS2812 = None
+                WS2812_mark = 0
+                state.update({"checked": True, "supported": False, "reason": "unsupported_pi5", "driver": None})
+                return False
+
+            driver_pref = (WS2812_DRIVER or "auto").strip().lower()
+            driver_queue = []
+            if driver_pref in ("auto", "spi"):
+                driver_queue.append("spi")
+            if driver_pref in ("auto", "pwm"):
+                driver_queue.append("pwm")
+            if not driver_queue:
+                driver_queue.extend(["spi", "pwm"])
+
+            last_error = None
+            for driver in driver_queue:
+                try:
+                    if driver == "spi":
+                        candidate = robotLight.Adeept_SPI_LedPixel(WS2812_LED_COUNT, WS2812_BRIGHTNESS)
+                        if candidate.check_spi_state() == 0:
+                            candidate.led_close()
+                            raise RuntimeError("WS2812 SPI init failed (check /dev/spidev*)")
+                    else:
+                        candidate = robotLight.RobotWS2812()
+                    candidate.start()
+                    candidate.breath(70, 70, 255)
+                    WS2812 = candidate
+                    WS2812_mark = 1
+                    logger.info({"evt": "ws2812_init", "driver": driver})
+                    state.update({"checked": True, "supported": True, "reason": None, "driver": driver})
+                    return True
+                except Exception as exc:
+                    last_error = exc
+                    logger.warning({"evt": "ws2812_init_failed", "driver": driver, "error": str(exc)})
+            WS2812 = None
+            WS2812_mark = 0
+            if last_error:
+                logger.warning({"evt": "ws2812_init_error", "error": str(last_error)})
+            state.update({"checked": True, "supported": False, "reason": "init_failed", "driver": None})
+            return False
+        except Exception as exc:
+            logger.warning({"evt": "ws2812_init_error", "error": str(exc)})
+            WS2812 = None
+            WS2812_mark = 0
+            state.update({"checked": True, "supported": False, "reason": "init_error", "driver": None})
+            return False
+
+
+def _ws2812_available() -> bool:
+    state = _WS2812_STATUS
+    if state["checked"] and not state["supported"]:
+        return False
+    if WS2812 is not None and WS2812_mark == 1:
+        return True
+    return _initialize_ws2812_driver()
+
+
+def _ws2812_apply_color(r: int, g: int, b: int) -> bool:
+    controller = globals().get("WS2812")
+    if controller is None:
+        return False
+    candidates = [
+        getattr(controller, "setColor", None),
+        getattr(controller, "set_all_led_color_data", None),
+        getattr(controller, "set_all_led_color", None),
+    ]
+    for func in candidates:
+        if callable(func):
+            try:
+                func(r, g, b)
+                return True
+            except Exception as exc:
+                logger.warning(
+                    {"evt": "ws2812_apply_color_failed", "method": getattr(func, "__name__", str(func)), "error": str(exc)}
+                )
+    return False
+
+
+def _ws2812_set_color(r: int, g: int, b: int) -> bool:
+    if not _ws2812_available():
+        logger.debug({"evt": "ws2812_unavailable", "action": "set_color", "reason": _WS2812_STATUS.get("reason")})
+        return False
+    controller = globals().get("WS2812")
+    if controller is None:
+        return False
+
+    try:
+        pause = getattr(controller, "pause", None)
+        if callable(pause):
+            pause()
+    except Exception as exc:
+        logger.debug({"evt": "ws2812_pause_failed", "error": str(exc)})
+
+    if not _ws2812_apply_color(r, g, b):
+        logger.warning({"evt": "ws2812_set_color_failed", "error": "no applicable color writer"})
+        return False
+
+    show = getattr(controller, "show", None)
+    if callable(show):
+        try:
+            show()
+        except TypeError:
+            show(1)
+    return True
+
+
+def _ws2812_turn_off() -> bool:
+    if not _ws2812_available():
+        logger.debug({"evt": "ws2812_unavailable", "action": "turn_off", "reason": _WS2812_STATUS.get("reason")})
+        return False
+    try:
+        controller = globals().get("WS2812")
+        if controller is None:
+            return False
+        pause = getattr(controller, "pause", None)
+        if callable(pause):
+            try:
+                pause()
+            except Exception as exc:
+                logger.debug({"evt": "ws2812_pause_failed", "error": str(exc)})
+
+        if not _ws2812_apply_color(0, 0, 0):
+            logger.warning({"evt": "ws2812_zero_failed", "error": "no applicable color writer"})
+            fallback = getattr(controller, "set_all_led_color_data", None) or getattr(controller, "set_all_led_color", None)
+            if callable(fallback):
+                fallback(0, 0, 0)
+
+        show = getattr(controller, "show", None)
+        if callable(show):
+            try:
+                show()
+            except TypeError:
+                show(1)
+    except Exception as exc:
+        logger.warning({"evt": "ws2812_off_failed", "error": str(exc)})
+        return False
+    return True
+
+
+def _update_distance_cache(value: Optional[float]) -> None:
+    with _distance_lock:
+        _distance_state["value"] = value
+        _distance_state["timestamp"] = time.time()
+
+
+def _get_distance_snapshot() -> tuple[Optional[float], float]:
+    with _distance_lock:
+        return _distance_state["value"], _distance_state["timestamp"]
+
+
+def _distance_worker(poll_interval: float = 0.1) -> None:
+    while True:
+        try:
+            measurement = ultra.checkdist()
+            if measurement is not None and math.isfinite(measurement):
+                value = max(0.0, float(measurement))
+                _update_distance_cache(value)
+        except Exception as exc:
+            logger.debug({"evt": "ultrasonic_read_error", "error": str(exc)})
+        time.sleep(poll_interval)
+
+
+def _get_lighting_status() -> dict:
+    return {
+        "strip_available": bool(WS2812_mark == 1 and _WS2812_STATUS.get("supported")),
+        "strip_reason": _WS2812_STATUS.get("reason"),
+        "strip_driver": _WS2812_STATUS.get("driver"),
+    }
 
 def servoPosInit():
     scGear.initConfig(0,init_pwm0,1)
@@ -247,16 +451,6 @@ def functionSelect(command_input, response):
     elif 'KD' == command_input:
         servoPosInit()
         fuc.keepDistance()
-        if WS2812_mark:
-            WS2812.police()
-
-    elif 'police' == command_input:
-        if WS2812_mark:
-            WS2812.police()
-
-    elif 'policeOff' == command_input:
-        if WS2812_mark:
-            WS2812.breath(70,70,255)
 
     elif 'automatic' == command_input:
         if modeSelect == 'PT':
@@ -265,12 +459,25 @@ def functionSelect(command_input, response):
             fuc.pause()
 
     elif 'automaticOff' == command_input:
-        if WS2812_mark:
-            WS2812.pause()
+        _ws2812_turn_off()
         fuc.pause()
         move.motorStop()
         time.sleep(0.3)
         move.motorStop()
+
+    elif 'wsStripOn' == command_input:
+        if _ws2812_set_color(0, 90, 255):
+            log_led_action('wsStripOn', color=[0, 90, 255])
+            buzzer.tick()
+        else:
+            logger.warning({"evt": "ws_strip_failed", "action": "on", "reason": _WS2812_STATUS.get("reason")})
+
+    elif 'wsStripOff' == command_input:
+        if _ws2812_turn_off():
+            log_led_action('wsStripOff')
+            buzzer.tick()
+        else:
+            logger.warning({"evt": "ws_strip_failed", "action": "off", "reason": _WS2812_STATUS.get("reason")})
 
     elif 'trackLine' == command_input:
         servoPosInit()
@@ -639,6 +846,10 @@ def _log_shoulder_state(event: str, **extra) -> None:
     logger.info(telemetry)
 
 
+servo_calibration.register_shoulder_observer(_apply_shoulder_calibration)
+_apply_shoulder_calibration(servo_calibration.get_shoulder_calibration())
+
+
 def _cancel_shoulder_timeout() -> None:
     global _shoulder_timeout
     with _shoulder_timeout_lock:
@@ -740,8 +951,7 @@ def wifi_check():
         ap_threading=threading.Thread(target=ap_thread)   #Define a thread for data receiving
         ap_threading.setDaemon(True)                          #'True' means it is a front thread,it would close when the mainloop() closes
         ap_threading.start()                                  #Thread starts
-        if WS2812_mark:
-            WS2812.setColor(0,16,50)
+        _ws2812_set_color(0,16,50)
         time.sleep(1)
 
 async def check_permit(websocket):
@@ -788,6 +998,12 @@ async def recv_msg(websocket):
                 percentage_str = 'N/A'
                 voltage_num = None
                 percentage_num = None
+                distance_cm = None
+                distance_display = "--"
+                cached_distance, _cached_ts = _get_distance_snapshot()
+                if cached_distance is not None:
+                    distance_cm = cached_distance
+                    distance_display = f"{distance_cm:.1f}"
                 if battery is not None:
                     try:
                         voltage_value = battery.read_voltage()
@@ -800,6 +1016,15 @@ async def recv_msg(websocket):
                             percentage_str = f"{int(round(percentage_num))}"
                     except Exception as exc:
                         logger.warning({"evt": "battery_read_error", "error": str(exc)})
+                if distance_cm is None:
+                    try:
+                        dist_measurement = ultra.checkdist()
+                        if dist_measurement is not None:
+                            distance_cm = max(0.0, float(dist_measurement))
+                            distance_display = f"{distance_cm:.1f}"
+                            _update_distance_cache(distance_cm)
+                    except Exception as exc:
+                        logger.debug({"evt": "ultrasonic_read_error", "error": str(exc)})
 
                 gyro_values = ["N/A", "N/A", "N/A"]
                 accel_values = ["N/A", "N/A", "N/A"]
@@ -856,6 +1081,11 @@ async def recv_msg(websocket):
                     "y": accel_values[1],
                     "z": accel_values[2],
                 }
+                response['distance'] = {
+                    "cm": distance_cm,
+                    "display": distance_display,
+                }
+                response['lights'] = _get_lighting_status()
                 handled_locally = True
 
             elif data.startswith('wsB'):
@@ -949,21 +1179,10 @@ if __name__ == '__main__':
 
     buzzer.alert()
 
-    try:
-        # global WS2812
-        robotlight_check = robotLight.check_rpi_model()
-        if robotlight_check == 5:
-            logger.warning({"evt": "ws2812_unsupported_pi5"})
-            WS2812_mark = 0 # WS2812 not compatible
-        else:
-            logger.info({"evt": "ws2812_init", "status": "ok"})
-            WS2812_mark = 1
-            WS2812=robotLight.RobotWS2812()
-            WS2812.start()
-            WS2812.breath(70,70,255)
-    except Exception as exc:
-        logger.warning({"evt": "ws2812_missing_dependency", "hint": "pip install rpi_ws281x", "error": str(exc)})
-        pass
+    distance_thread = threading.Thread(target=_distance_worker, name="distance_worker", daemon=True)
+    distance_thread.start()
+
+    _initialize_ws2812_driver()
 
     while  1:
         wifi_check()
@@ -975,24 +1194,16 @@ if __name__ == '__main__':
             break
         except Exception as e:
             logger.error({"evt": "ws_server_error", "error": str(e)})
-            if WS2812_mark:
-                WS2812.setColor(0,0,0)
-            else:
-                pass
+            _ws2812_turn_off()
 
         try:
             if WS2812_mark == 1:
-                WS2812.setColor(0,80,255)
-            else:
-                pass
-        except:
+                _ws2812_set_color(0,80,255)
+        except Exception:
             pass
     try:
         asyncio.get_event_loop().run_forever()
     except Exception as e:
         logger.error({"evt": "ws_loop_error", "error": str(e)})
-        if WS2812_mark:
-            WS2812.setColor(0,0,0)
-        else:
-            pass
+        _ws2812_turn_off()
         move.destroy()

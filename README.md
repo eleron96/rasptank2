@@ -103,6 +103,10 @@ This repository hosts the control software for the RaspTank2 tracked rover: Web 
 | `BATTERY_VOLT_MAX` | `8.4` | Voltage mapped to 100% (2S Li-ion). |
 | `BATTERY_ADC_CHANNEL` | `0` | ADS7830 channel wired to the battery divider. |
 | `BATTERY_CAL_FACTOR` / `BATTERY_CAL_OFFSET` | `1.0` / `0.0` | Manual overrides for calibration math. |
+| `WS2812_DRIVER` | `auto` | `spi` (Robot HAT V3.1 port), `pwm`, or auto-detect fallback. |
+| `WS2812_LED_COUNT` | `16` | Total number of WS2812 pixels (built-in + external strip). |
+| `WS2812_BRIGHTNESS` | `255` | SPI strip brightness (0-255). |
+| `WS2812_ALLOW_PI5` | `0` | Set to `1` to bypass the Pi 5 safety check and try driving WS2812 over SPI anyway. |
 | `LOG_LEVEL` | `INFO` | Python logging threshold. |
 | `SHOULDER_LVC_DISABLE` | `1` | Set to `0` to enable the low-voltage shoulder guard. |
 | `SHOULDER_LVC_LOWER` / `SHOULDER_LVC_UPPER` | `6.0` / `6.2` | Voltage window to block/release shoulder motion. |
@@ -152,11 +156,13 @@ Provide these through `.env`, `docker-compose.yml`, or the shell environment pri
 | Line tracker middle | GPIO27 (pin 13) | Active-low digital input. |
 | Line tracker right | GPIO17 (pin 11) | Active-low digital input. |
 | Buzzer | GPIO18 (pin 12) | PWM capable; controlled via `BUZZER_GPIO`. |
-| WS2812 LED chain | GPIO12 (pin 32) | Data line; power LEDs from the battery rail. |
+| WS2812 LED chain | GPIO10 (pin 19, SPI MOSI) | Two on-board pixels use indexes 0-1; daisy-chain OUT→IN for additional strips. |
 | Auxiliary LED 1 | GPIO9 (pin 21) | Managed by `switch.switch(1, ...)`. |
 | Auxiliary LED 2 | GPIO25 (pin 22) | Managed by `switch.switch(2, ...)`. |
 | Auxiliary LED 3 | GPIO11 (pin 23) | Managed by `switch.switch(3, ...)`. |
 | IMU (if present) | I2C bus | Supported through `imu_sensor.py`. |
+
+> **WS2812 wiring:** The Robot HAT V3.1 routes the WS2812 connector to SPI MOSI (GPIO10). Enable SPI in `raspi-config`, feed the strip with 5 V and shared GND, and chain `OUT` of each section to the next `IN`. The two pixels soldered to the HAT occupy indexes 0 and 1, so external LEDs start at index 2.
 
 ## Usage
 - **Docker**: `docker compose logs -f rasptank2` to watch events, `docker compose stop` to halt, `docker compose down` to tear down the stack.

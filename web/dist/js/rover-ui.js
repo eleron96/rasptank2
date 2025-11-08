@@ -36,6 +36,8 @@
     utilities: Array.from(document.querySelectorAll('.secondary-button[data-command]')),
     videoImage: document.getElementById('video-stream'),
     videoRefresh: document.getElementById('refresh-video'),
+    distanceBadge: document.getElementById('distance-overlay'),
+    stripButton: document.querySelector('[data-light="strip"]'),
     calibrationModal: document.getElementById('calibration-modal'),
     calibrationBase: document.getElementById('calibration-base'),
     calibrationRaise: document.getElementById('calibration-raise'),
@@ -74,6 +76,9 @@
       window: [],
       ema: null,
       last: null
+    },
+    lights: {
+      stripAvailable: true
     }
   };
 
@@ -290,6 +295,7 @@ function voltageToPercent (voltage) {
       const off = btn.dataset.off;
       state.actionStates[cmd] = false;
       btn.addEventListener('click', () => {
+        if (btn.disabled) return;
         const active = !state.actionStates[cmd];
         state.actionStates[cmd] = active;
         btn.classList.toggle('is-active', active);
@@ -758,6 +764,7 @@ function voltageToPercent (voltage) {
     const battery = payload.battery || {};
     const gyro = payload.gyro || {};
     const accel = payload.accel || {};
+    const distance = payload.distance || {};
     const cpuTemp = data[0];
     const cpuUsage = data[1];
     const ramUsage = data[2];
@@ -812,6 +819,18 @@ function voltageToPercent (voltage) {
     }
     if (state.charts.cpu) {
       pushChartValue(state.cpuHistory, parseFloat(cpuUsage || '0'), state.charts.cpu);
+    }
+
+    updateLightingCapabilities(payload.lights);
+
+    if (elements.distanceBadge) {
+      let badgeText = 'Distance: -- cm';
+      if (Number.isFinite(distance.cm)) {
+        badgeText = `Distance: ${distance.cm.toFixed(1)} cm`;
+      } else if (distance.display && distance.display !== '--') {
+        badgeText = `Distance: ${distance.display} cm`;
+      }
+      elements.distanceBadge.textContent = badgeText;
     }
   }
 
@@ -892,10 +911,33 @@ function voltageToPercent (voltage) {
     el.textContent = label;
   }
 
+  function updateLightingCapabilities (lights) {
+    const stripBtn = elements.stripButton;
+    if (!stripBtn) return;
+    const available = !(lights && lights.strip_available === false);
+    stripBtn.disabled = !available;
+    stripBtn.classList.toggle('is-disabled', !available);
+    if (!available) {
+      const reason = lights?.strip_reason;
+      let message = 'LED strip unavailable';
+      if (reason === 'unsupported_pi5') {
+        message = 'WS2812 LEDs unsupported on Raspberry Pi 5';
+      } else if (reason === 'init_failed' || reason === 'init_error') {
+        message = 'WS2812 driver init failed';
+      }
+      stripBtn.title = message;
+      stripBtn.classList.remove('is-active');
+      state.actionStates[stripBtn.dataset.action] = false;
+    } else {
+      stripBtn.removeAttribute('title');
+    }
+    state.lights.stripAvailable = available;
+  }
+
   function startInfoPolling () {
     window.setInterval(() => {
       sendCommand('get_info');
-    }, 4000);
+    }, 1000);
   }
 
   function sendCommand (command) {

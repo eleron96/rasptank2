@@ -1,4 +1,5 @@
 # ==== Конфиг ====
+#100.64.22.1 - этот адрес если через tailscale
 PI_HOST ?= 192.168.0.188
 PI_USER ?= niko
 APP_NAME ?= rasptank2
