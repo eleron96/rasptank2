@@ -56,6 +56,8 @@
     openCalibration: document.getElementById('open-calibration')
   };
 
+  const BATTERY_MIN_VOLTAGE = 6.8;
+
   const state = {
     ws: null,
     eventSource: null,
@@ -96,7 +98,8 @@
     gradient: {
       dark: { instance: null, currentState: null },
       eco: { instance: null, currentState: null }
-    }
+    },
+    reloadVideoStream: null
   };
 
   const armMappings = [
@@ -105,34 +108,6 @@
     { label: 'Wrist', command: 'handUp', stop: 'handStop', alt: 'handDown', icons: { primary: 'expand_less', secondary: 'expand_more' } },
     { label: 'Rotate', command: 'lookleft', stop: 'LRstop', alt: 'lookright', icons: { primary: 'arrow_back', secondary: 'arrow_forward' } },
     { label: 'Camera', command: 'up', stop: 'UDstop', alt: 'down', icons: { primary: 'arrow_upward', secondary: 'arrow_downward' } }
-  ];
-
-  const ocvTable = [
-    [4.20, 100],
-    [4.15, 95],
-    [4.10, 90],
-    [4.05, 85],
-    [4.00, 80],
-    [3.95, 75],
-    [3.90, 70],
-    [3.85, 65],
-    [3.80, 60],
-    [3.75, 55],
-    [3.70, 50],
-    [3.65, 45],
-    [3.60, 40],
-    [3.55, 35],
-    [3.50, 30],
-    [3.45, 25],
-    [3.40, 20],
-    [3.35, 15],
-    [3.30, 10],
-    [3.25, 8],
-    [3.20, 6],
-    [3.15, 4],
-    [3.10, 2],
-    [3.05, 1],
-    [3.00, 0]
   ];
 
   const QUALITY_DEFAULT_CLASS = 'text-white/70';
@@ -167,33 +142,18 @@
   }
 
   
-  function getCellCount () {
-    const meta = state.batteryMeta || {};
-    const scale = Number(meta.scale) || 8.4;
-    const cells = Math.max(1, Math.round((scale / 4.2) * 10) / 10);
-    return cells;
-  }
-
-function voltageToPercent (voltage) {
+  function voltageToPercent (voltage) {
     if (!Number.isFinite(voltage)) {
       return null;
     }
-    if (voltage >= ocvTable[0][0]) {
-      return 100;
+    const maxVoltage = Number(state.batteryMeta?.scale) || 8.4;
+    const minVoltage = Number(state.batteryMeta?.min_voltage ?? BATTERY_MIN_VOLTAGE);
+    const span = maxVoltage - minVoltage;
+    if (span <= 0) {
+      return null;
     }
-    const last = ocvTable[ocvTable.length - 1][0];
-    if (voltage <= last) {
-      return 0;
-    }
-    for (let i = 0; i < ocvTable.length - 1; i += 1) {
-      const [v1, p1] = ocvTable[i];
-      const [v2, p2] = ocvTable[i + 1];
-      if (voltage <= v1 && voltage >= v2) {
-        const ratio = (voltage - v2) / (v1 - v2);
-        return p2 + (p1 - p2) * ratio;
-      }
-    }
-    return Math.max(0, Math.min(100, (voltage / 4.2) * 100));
+    const pct = ((voltage - minVoltage) / span) * 100;
+    return Math.max(0, Math.min(100, pct));
   }
 
   function init () {
@@ -300,6 +260,7 @@ function voltageToPercent (voltage) {
       const url = fresh ? `/video_feed?rand=${Date.now()}` : '/video_feed';
       elements.videoImage.src = url;
     };
+    state.reloadVideoStream = assignSource;
     assignSource(true);
     elements.videoImage.addEventListener('error', () => {
       window.setTimeout(() => assignSource(true), 2000);
@@ -350,6 +311,7 @@ function voltageToPercent (voltage) {
         updateHdToggle();
         updateGradientTheme();
         sendCommand(enable ? 'cameraHQOn' : 'cameraHQOff');
+        state.reloadVideoStream?.(true);
       });
     }
 
@@ -936,9 +898,7 @@ function voltageToPercent (voltage) {
     ];
     const rawVoltage = rawVoltageCandidates.find((value) => Number.isFinite(value));
     const smoothedVoltage = smoothVoltage(rawVoltage);
-    const cells = getCellCount();
-    const perCellVoltage = smoothedVoltage != null ? smoothedVoltage / cells : null;
-    const percentFromVoltage = perCellVoltage != null ? voltageToPercent(perCellVoltage) : null;
+    const percentFromVoltage = smoothedVoltage != null ? voltageToPercent(smoothedVoltage) : null;
     const fallbackVoltageStr = (battery.voltage_display && battery.voltage_display !== 'N/A') ? battery.voltage_display : sanitizeNumber(data[3]);
     let percentValue = Number.isFinite(percentFromVoltage) ? percentFromVoltage : null;
     if (percentValue === null) {
@@ -1147,7 +1107,8 @@ function voltageToPercent (voltage) {
     button.classList.toggle('is-disabled', !inActiveMode);
     button.classList.toggle('is-active', enabled);
     button.setAttribute('aria-pressed', enabled ? 'true' : 'false');
-    button.title = inActiveMode ? '2304×1296 @ 60fps' : 'Доступно только в режиме Active';
+    button.title = inActiveMode ? '1920×1080 @ 30fps' : 'Доступно только в режиме Active';
+    document.body?.classList.toggle('camera-hq', enabled);
   }
 
   function sanitizeNumber (value) {

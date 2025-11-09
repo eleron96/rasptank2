@@ -316,6 +316,14 @@
         height: 100%;
         min-height: 240px;
       }
+      .camera-feed {
+        object-fit: cover;
+        background-color: #000;
+        transition: object-fit 0.25s ease;
+      }
+      body.camera-hq .camera-feed {
+        object-fit: contain;
+      }
       .pad-button {
         display: inline-flex;
         align-items: center;
@@ -490,7 +498,7 @@
           <div class="flex items-center flex-wrap gap-2">
             <button type="button" class="mode-toggle header-mode" data-mode="ACTIVE" data-command="modeActive" data-label-active="Active" data-label-standby="Standby (auto)">Active</button>
             <button type="button" class="mode-toggle header-mode" data-mode="ECO" data-command="modeEco">Eco</button>
-            <button type="button" id="camera-hq-toggle" class="header-mode" title="2304×1296 @ 60fps (Active only)">HD+</button>
+            <button type="button" id="camera-hq-toggle" class="header-mode" title="1920×1080 @ 30fps (Active only)">HD+</button>
           </div>
           <div class="flex items-center gap-2 text-sm">
             <span class="material-symbols-outlined text-green-400" id="connection-indicator">wifi_off</span>
@@ -506,7 +514,7 @@
             <div class="camera-frame relative rounded-xl overflow-hidden bg-black/70 border border-white/5 shadow-xl h-[60vh]">
               <div id="distance-overlay" class="hud-badge">Distance - -- cm</div>
               <div class="hud-crosshair" aria-hidden="true"></div>
-              <img id="video-stream" src="" alt="Rover camera feed" class="absolute inset-0 w-full h-full object-cover bg-black select-none pointer-events-none">
+              <img id="video-stream" src="" alt="Rover camera feed" class="camera-feed absolute inset-0 w-full h-full bg-black select-none pointer-events-none">
             </div>
           </section>
 
@@ -540,6 +548,13 @@
                     <div class="arm-cluster" data-label="Wrist" data-command="handUp" data-stop="handStop" data-command-alt="handDown"></div>
                     <div class="arm-cluster" data-label="Rotate" data-command="lookleft" data-stop="LRstop" data-command-alt="lookright" data-icons="arrow_back,arrow_forward"></div>
                     <div class="arm-cluster" data-label="Camera" data-command="up" data-stop="UDstop" data-command-alt="down"></div>
+                  </div>
+                </div>
+                <div class="glass-panel-light border rounded-xl p-4 space-y-4">
+                  <p class="text-sm text-white/70 font-medium text-center tracking-wide uppercase">Lighting</p>
+                  <div class="grid grid-cols-1 gap-2">
+                    <button class="action-toggle" data-action="ledOn" data-off="ledOff">Headlight LED</button>
+                    <button class="action-toggle" data-action="wsStripOn" data-off="wsStripOff" data-light="strip">LED Strip</button>
                   </div>
                 </div>
               </div>
@@ -641,13 +656,6 @@
                       <button class="action-toggle" data-action="motionGet" data-off="stopCV">Motion Get</button>
                       <button class="action-toggle" data-action="automatic" data-off="automaticOff">Auto Matic</button>
                       <button class="action-toggle" data-action="trackLine" data-off="trackLineOff">Track Line</button>
-                    </div>
-                  </div>
-                  <div class="space-y-3">
-                    <p class="text-white/70 text-sm font-medium uppercase tracking-wide">Lighting</p>
-                    <div class="glass-panel-light border rounded-xl p-4 grid grid-cols-1 gap-2">
-                      <button class="action-toggle" data-action="ledOn" data-off="ledOff">Headlight LED</button>
-                      <button class="action-toggle" data-action="wsStripOn" data-off="wsStripOff" data-light="strip">LED Strip</button>
                     </div>
                   </div>
                 </div>

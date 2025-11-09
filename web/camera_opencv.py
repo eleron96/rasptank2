@@ -22,7 +22,7 @@ _VIDEO_PROFILES = {
     "STANDBY": _STANDBY_PROFILE,
     "STABILITY": _STANDBY_PROFILE,
     "ECO": {"resolution": (640, 480), "delay": 0.15, "fps": 5},
-    "ACTIVE_HIGH": {"resolution": (2304, 1296), "delay": 0.0, "fps": 60},
+    "ACTIVE_HIGH": {"resolution": (1920, 1080), "delay": 0.0, "fps": 30},
 }
 _current_profile = "ACTIVE"
 _profile_lock = threading.Lock()
@@ -539,15 +539,45 @@ class Camera(BaseCamera):
                 raise RuntimeError(f"Picamera2 module unavailable: {exc}") from exc
 
             picam2 = Picamera2()
-            config = picam2.create_preview_configuration(
-                main={"size": (640, 480), "format": "RGB888"},
-                transform=libcamera.Transform(hflip=hflip, vflip=vflip),
-            )
-            picam2.configure(config)
-            picam2.start()
+            transform = libcamera.Transform(hflip=hflip, vflip=vflip)
+            configs = {}
+            current_config = None
+
+            def build_config(key):
+                if key in configs:
+                    return configs[key]
+                is_high = key == "high"
+                resolution = _VIDEO_PROFILES["ACTIVE_HIGH" if is_high else "ACTIVE"]["resolution"]
+                size = tuple(resolution)
+                factory = picam2.create_video_configuration if is_high else picam2.create_preview_configuration
+                configs[key] = factory(
+                    main={"size": size, "format": "RGB888"},
+                    transform=transform,
+                )
+                return configs[key]
+
+            def ensure_profile():
+                nonlocal current_config
+                profile = _get_stream_profile()
+                profile_name = profile.get("name", "ACTIVE").upper()
+                target_key = "high" if profile_name == "ACTIVE_HIGH" else "default"
+                if target_key == current_config:
+                    return
+                config = build_config(target_key)
+                if current_config is not None:
+                    try:
+                        picam2.stop()
+                    except Exception:
+                        pass
+                picam2.configure(config)
+                picam2.start()
+                current_config = target_key
+
+            ensure_profile()
             print("Using Picamera2 backend for video stream.")
 
             while True:
+                ensure_profile()
                 img = picam2.capture_array()
                 yield img
 
@@ -561,11 +591,26 @@ class Camera(BaseCamera):
             cap = cv2.VideoCapture(source_to_use)
             if not cap.isOpened():
                 raise RuntimeError(f"Unable to open camera device {source_to_use}")
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            current_profile = None
+
+            def apply_profile():
+                nonlocal current_profile
+                profile = _get_stream_profile()
+                profile_name = profile.get("name", "ACTIVE").upper()
+                if profile_name == current_profile:
+                    return
+                resolution = tuple(profile.get("resolution") or _VIDEO_PROFILES["ACTIVE"]["resolution"])
+                fps = profile.get("fps") or _VIDEO_PROFILES["ACTIVE"]["fps"]
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, resolution[0])
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, resolution[1])
+                cap.set(cv2.CAP_PROP_FPS, fps)
+                current_profile = profile_name
+
+            apply_profile()
             cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
             print(f"Using OpenCV backend for video stream on {source_to_use}.")
             while True:
+                apply_profile()
                 ret, frame = cap.read()
                 if not ret:
                     time.sleep(0.05)
