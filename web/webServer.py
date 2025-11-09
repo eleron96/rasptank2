@@ -32,6 +32,7 @@ from pca9685_driver import angle_to_us
 #websocket
 import asyncio
 import websockets
+from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 
 import json
 import app
@@ -1138,7 +1139,11 @@ async def recv_msg(websocket):
         }
 
         data = ''
-        data = await websocket.recv()
+        try:
+            data = await websocket.recv()
+        except (ConnectionClosedOK, ConnectionClosedError) as exc:
+            logger.debug({"evt": "ws_connection_closed", "code": getattr(exc, "code", None), "reason": getattr(exc, "reason", None)})
+            break
         try:
             data = json.loads(data)
         except Exception as e:
@@ -1311,8 +1316,13 @@ async def recv_msg(websocket):
         await websocket.send(response)
 
 async def main_logic(websocket, path):
-    await check_permit(websocket)
-    await recv_msg(websocket)
+    try:
+        await check_permit(websocket)
+        await recv_msg(websocket)
+    except ConnectionClosedOK:
+        logger.debug({"evt": "ws_session_closed", "code": 1000})
+    except ConnectionClosedError as exc:
+        logger.info({"evt": "ws_session_error", "code": getattr(exc, "code", None), "reason": getattr(exc, "reason", None)})
 
 if __name__ == '__main__':
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()

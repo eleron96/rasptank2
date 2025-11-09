@@ -369,14 +369,12 @@
               <div class="stat-card">
                 <div class="flex justify-between items-center mb-2">
                   <p class="stat-title">Distance Monitor</p>
-                  <div class="flex items-center gap-2">
-                    <button id="distance-settings-button" class="size-7 grid place-items-center rounded-full border border-white/15 text-white/70 hover:border-primary hover:text-primary transition">
-                      <span class="material-symbols-outlined text-base">settings</span>
-                    </button>
-                    <p class="stat-value"><span id="distance-status-value">--</span> cm</p>
-                  </div>
+                  <button id="distance-settings-button" class="size-7 grid place-items-center rounded-full border border-white/15 text-white/70 hover:border-primary hover:text-primary transition">
+                    <span class="material-symbols-outlined text-base">settings</span>
+                  </button>
                 </div>
-                <p class="text-xs text-white/60">Status: <span id="distance-status-label">Disabled</span></p>
+                <p class="text-2xl font-semibold text-white/90">Distance: <span id="distance-status-value">--</span> cm</p>
+                <p class="text-xs text-white/60 mt-1">Status: <span id="distance-status-label">Disabled</span></p>
                 <div id="distance-settings-panel" class="hidden mt-3 rounded-lg border border-white/10 bg-panel-muted/40 p-3 space-y-2 text-xs text-white/70">
                   <label class="flex items-center justify-between gap-3">
                     <span>Enable ultrasonic sensor</span>

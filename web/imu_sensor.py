@@ -105,6 +105,18 @@ class MPU6050:
 _sensor: Optional[MPU6050] = None
 _sensor_lock = threading.Lock()
 _next_retry = 0.0
+_imu_warning_history: Dict[str, float] = {}
+_IMU_WARNING_INTERVAL = 300.0  # seconds
+
+
+def _log_imu_warning(event: str, address: str, error: str) -> None:
+    now = time.monotonic()
+    last = _imu_warning_history.get(address)
+    if last is not None and now - last < _IMU_WARNING_INTERVAL:
+        LOGGER.debug({"evt": event, "address": address, "error": error})
+        return
+    _imu_warning_history[address] = now
+    LOGGER.warning({"evt": event, "address": address, "error": error})
 
 
 def _ensure_sensor() -> Optional[MPU6050]:
@@ -129,7 +141,7 @@ def _ensure_sensor() -> Optional[MPU6050]:
                 LOGGER.info({"evt": "imu_initialized", "address": hex(address)})
                 break
             except Exception as exc:  # pragma: no cover - hardware specific
-                LOGGER.warning({"evt": "imu_init_failed", "address": hex(address), "error": str(exc)})
+                _log_imu_warning("imu_init_failed", hex(address), str(exc))
                 _sensor = None
         if _sensor is None:
             _next_retry = time.monotonic() + 30.0
@@ -145,7 +157,7 @@ def sample() -> Optional[Dict[str, Any]]:
     try:
         return sensor.sample()
     except Exception as exc:  # pragma: no cover - hardware/I2C failures
-        LOGGER.warning({"evt": "imu_sample_failed", "error": str(exc)})
+        _log_imu_warning("imu_sample_failed", hex(getattr(sensor, "_address", 0)), str(exc))
         with _sensor_lock:
             if _sensor is sensor:
                 sensor.close()

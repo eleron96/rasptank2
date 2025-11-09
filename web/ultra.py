@@ -8,8 +8,9 @@
 import atexit
 import logging
 import math
-import time
 import threading
+import time
+import warnings
 from typing import Optional
 
 logger = logging.getLogger("rasptank.ultra")
@@ -22,6 +23,12 @@ except (RuntimeError, ImportError) as exc:
 
 try:  # pragma: no cover - optional dependency
     from gpiozero import DistanceSensor
+    try:
+        from gpiozero.input_devices import PWMSoftwareFallback  # type: ignore
+    except Exception:  # pragma: no cover - optional
+        PWMSoftwareFallback = None
+    else:  # pragma: no cover - optional, runtime-only
+        warnings.filterwarnings("ignore", category=PWMSoftwareFallback)
 except Exception as exc:  # pragma: no cover - optional dependency
     DistanceSensor = None
     logger.debug({"evt": "ultra_gpiozero_import_failed", "error": str(exc)})
@@ -55,7 +62,17 @@ def _setup_gpio() -> bool:
             _GPIO_INITIALIZED = True
         except Exception as exc:
             _GPIO_DISABLED = True
-            logger.warning({"evt": "ultra_gpio_setup_failed", "error": str(exc)})
+            error_text = str(exc)
+            log_method = logger.warning
+            expected_patterns = (
+                "peripheral base address",
+                "Permission denied",
+                "No such file or directory",
+                "operation not permitted",
+            )
+            if any(pattern.lower() in error_text.lower() for pattern in expected_patterns):
+                log_method = logger.info
+            log_method({"evt": "ultra_gpio_setup_failed", "error": error_text})
             return False
     return True
 
