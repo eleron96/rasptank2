@@ -39,7 +39,9 @@
     distanceBadge: document.getElementById('distance-overlay'),
     distanceStatusValue: document.getElementById('distance-status-value'),
     distanceStatusLabel: document.getElementById('distance-status-label'),
-    distanceButton: document.querySelector('[data-action="distanceMonitorOn"]'),
+    distanceSettingsButton: document.getElementById('distance-settings-button'),
+    distanceSettingsPanel: document.getElementById('distance-settings-panel'),
+    distanceToggle: document.getElementById('distance-toggle'),
     stripButton: document.querySelector('[data-light="strip"]'),
     calibrationModal: document.getElementById('calibration-modal'),
     calibrationBase: document.getElementById('calibration-base'),
@@ -198,6 +200,7 @@ function voltageToPercent (voltage) {
     setupCalibration();
     setupWebSocket();
     setupEvents();
+    setupDistanceSettings();
     setupConnectionQualityMonitor();
     startInfoPolling();
     updateConnection(false);
@@ -822,7 +825,7 @@ function voltageToPercent (voltage) {
     if (elements.distanceStatusLabel) {
       elements.distanceStatusLabel.textContent = formatDistanceStatus(resolvedStatus);
     }
-    syncDistanceButton(resolvedStatus);
+    syncDistanceToggle(resolvedStatus);
   }
 
   function formatDistanceStatus (status) {
@@ -838,12 +841,40 @@ function voltageToPercent (voltage) {
     }
   }
 
-  function syncDistanceButton (status) {
-    const btn = elements.distanceButton;
-    if (!btn) return;
-    const active = status && status !== 'disabled';
-    state.actionStates.distanceMonitorOn = active;
-    btn.classList.toggle('is-active', active);
+  function syncDistanceToggle (status) {
+    const toggle = elements.distanceToggle;
+    if (!toggle) return;
+    const shouldEnable = status && status !== 'disabled';
+    if (toggle.checked !== shouldEnable) {
+      toggle.checked = shouldEnable;
+    }
+    state.actionStates.distanceMonitorOn = shouldEnable;
+    toggle.disabled = false;
+  }
+
+  function setupDistanceSettings () {
+    const btn = elements.distanceSettingsButton;
+    const panel = elements.distanceSettingsPanel;
+    const toggle = elements.distanceToggle;
+    if (!btn || !panel) return;
+
+    const closePanel = () => panel.classList.add('hidden');
+    const togglePanel = (evt) => {
+      evt?.stopPropagation();
+      panel.classList.toggle('hidden');
+    };
+
+    btn.addEventListener('click', togglePanel);
+    panel.addEventListener('click', (evt) => evt.stopPropagation());
+    document.addEventListener('click', closePanel);
+
+    if (toggle) {
+      toggle.addEventListener('change', () => {
+        toggle.disabled = true;
+        const enabled = toggle.checked;
+        sendCommand(enabled ? 'distanceMonitorOn' : 'distanceMonitorOff');
+      });
+    }
   }
 
   function applyStats (payload) {

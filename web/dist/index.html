@@ -369,9 +369,21 @@
               <div class="stat-card">
                 <div class="flex justify-between items-center mb-2">
                   <p class="stat-title">Distance Monitor</p>
-                  <p class="stat-value"><span id="distance-status-value">--</span> cm</p>
+                  <div class="flex items-center gap-2">
+                    <button id="distance-settings-button" class="size-7 grid place-items-center rounded-full border border-white/15 text-white/70 hover:border-primary hover:text-primary transition">
+                      <span class="material-symbols-outlined text-base">settings</span>
+                    </button>
+                    <p class="stat-value"><span id="distance-status-value">--</span> cm</p>
+                  </div>
                 </div>
                 <p class="text-xs text-white/60">Status: <span id="distance-status-label">Disabled</span></p>
+                <div id="distance-settings-panel" class="hidden mt-3 rounded-lg border border-white/10 bg-panel-muted/40 p-3 space-y-2 text-xs text-white/70">
+                  <label class="flex items-center justify-between gap-3">
+                    <span>Enable ultrasonic sensor</span>
+                    <input id="distance-toggle" type="checkbox" class="h-4 w-7 accent-primary">
+                  </label>
+                  <p class="text-[11px] text-white/50 leading-snug">When enabled, readings pause automatically after 60s of no movement.</p>
+                </div>
               </div>
               <div class="stat-card space-y-2">
                 <p class="stat-title">Gyroscope (°/s)</p>
@@ -410,7 +422,6 @@
                       <button class="action-toggle" data-action="motionGet" data-off="stopCV">Motion Get</button>
                       <button class="action-toggle" data-action="automatic" data-off="automaticOff">Auto Matic</button>
                       <button class="action-toggle" data-action="trackLine" data-off="trackLineOff">Track Line</button>
-                      <button class="action-toggle" data-action="distanceMonitorOn" data-off="distanceMonitorOff">Distance Monitor</button>
                     </div>
                   </div>
                   <div class="space-y-3">
