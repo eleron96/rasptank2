@@ -8,6 +8,7 @@ import time
 import threading
 import logging
 import math
+import glob
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 import move
@@ -26,6 +27,7 @@ import battery_monitor
 import servo_calibration
 import socket
 import ultra
+import camera_opencv
 from events import event_bus
 from pca9685_driver import angle_to_us
 
@@ -93,6 +95,31 @@ _shoulder_timeout = None
 
 
 _lvc_state = {"ema": None, "blocked": False}
+
+SYSTEM_MODES = ("STANDBY", "ACTIVE", "ECO")
+_LEGACY_MODE_ALIASES = {"STABILITY": "STANDBY"}
+
+
+def _normalize_mode_name(value: Optional[str]) -> str:
+    if value is None:
+        return "ACTIVE"
+    mode = str(value).strip().upper()
+    return _LEGACY_MODE_ALIASES.get(mode, mode)
+
+
+_system_mode = _normalize_mode_name(os.getenv("SYSTEM_MODE_DEFAULT", "ACTIVE"))
+if _system_mode not in SYSTEM_MODES:
+    _system_mode = "ACTIVE"
+
+_distance_user_enabled = True
+_MODE_COMMANDS = {"modeStandby", "modeStability", "modeActive", "modeEco"}
+_CPU_GOVERNOR_PATH = "/sys/devices/system/cpu"
+_CPU_GOVERNOR_DEFAULT = os.getenv("CPU_GOVERNOR_ACTIVE", "ondemand")
+_CPU_GOVERNOR_LOW = os.getenv("CPU_GOVERNOR_LOW", "powersave")
+_camera_high_quality = False
+
+_MODE_IDLE_TIMEOUT = float(os.getenv("MODE_IDLE_TIMEOUT", "120"))
+_last_activity_ts = time.time()
 
 scGear = RPIservo.ServoCtrl()
 # scGear.setup()
@@ -413,7 +440,10 @@ def _distance_monitor_status(snapshot: Optional[dict] = None) -> str:
     return "active"
 
 
-def _set_distance_monitor_enabled(enabled: bool) -> None:
+def _set_distance_monitor_enabled(enabled: bool, remember: bool = True) -> None:
+    global _distance_user_enabled
+    if remember:
+        _distance_user_enabled = enabled
     with _distance_monitor_lock:
         previous = _distance_monitor_state["enabled"]
         if previous == enabled:
@@ -501,7 +531,15 @@ def _distance_worker(poll_interval: float = 0.1) -> None:
                 _broadcast_distance_update(None)
         except Exception as exc:
             logger.debug({"evt": "ultrasonic_read_error", "error": str(exc)})
-        time.sleep(poll_interval)
+        time.sleep(_get_distance_sleep_interval())
+
+
+def _get_distance_sleep_interval() -> float:
+    if _system_mode == "ECO":
+        return 2.0
+    if _system_mode == "STANDBY":
+        return 1.0
+    return 0.1
 
 
 def _distance_motion_listener() -> None:
@@ -512,6 +550,161 @@ def _distance_motion_listener() -> None:
             continue
         payload = message.get("payload") or {}
         _note_distance_motion(bool(payload.get("active")))
+
+
+def _set_cpu_governor(governor: str) -> bool:
+    governor = (governor or "").strip()
+    if not governor or not os.path.isdir(_CPU_GOVERNOR_PATH):
+        return False
+    paths = glob.glob(os.path.join(_CPU_GOVERNOR_PATH, "cpu[0-9]*/cpufreq/scaling_governor"))
+    if not paths:
+        return False
+    success = False
+    for path in paths:
+        try:
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(governor)
+            success = True
+        except Exception:
+            continue
+    if success:
+        logger.debug({"evt": "cpu_governor_set", "value": governor})
+    return success
+
+
+def _sync_distance_monitor_to_user_pref() -> None:
+    if _distance_user_enabled:
+        _set_distance_monitor_enabled(True, remember=False)
+    else:
+        _set_distance_monitor_enabled(False, remember=False)
+
+
+def _apply_camera_profile() -> None:
+    if _system_mode == "ACTIVE" and _camera_high_quality:
+        camera_opencv.set_stream_profile("ACTIVE_HIGH")
+    else:
+        camera_opencv.set_stream_profile(_system_mode)
+
+
+def _set_camera_high_quality(enabled: bool) -> None:
+    global _camera_high_quality
+    if enabled and _system_mode != "ACTIVE":
+        logger.info({"evt": "camera_hq_blocked", "reason": "mode", "mode": _system_mode})
+        return
+    if _camera_high_quality == enabled:
+        return
+    _camera_high_quality = enabled
+    _apply_camera_profile()
+    logger.info({"evt": "camera_high_quality", "enabled": enabled})
+
+
+def _note_activity() -> None:
+    global _last_activity_ts
+    _last_activity_ts = time.time()
+
+
+def _mode_idle_worker(interval: float = 2.0) -> None:
+    while True:
+        try:
+            if _system_mode == "ACTIVE":
+                idle_for = time.time() - _last_activity_ts
+                if idle_for >= _MODE_IDLE_TIMEOUT:
+                    _set_system_mode("STANDBY", reason="idle", auto=True)
+        except Exception as exc:
+            logger.debug({"evt": "mode_idle_error", "error": str(exc)})
+        time.sleep(interval)
+
+
+def _set_system_mode(mode: str, reason: Optional[str] = None, auto: bool = False, force: bool = False) -> bool:
+    global _system_mode, _camera_high_quality
+    if not mode:
+        return False
+    normalized = _normalize_mode_name(mode)
+    if normalized not in SYSTEM_MODES:
+        return False
+    if not force and normalized == _system_mode:
+        return False
+
+    previous = _system_mode
+    _system_mode = normalized
+
+    if normalized == "STANDBY":
+        _set_cpu_governor(_CPU_GOVERNOR_LOW)
+        _camera_high_quality = False
+        _apply_camera_profile()
+        move.motorStop()
+        fuc.pause()
+        switch.set_all_switch_off()
+        pwm_led.turn_off()
+        _ws2812_turn_off()
+        _set_distance_monitor_enabled(False, remember=False)
+    elif normalized == "ECO":
+        _set_cpu_governor(_CPU_GOVERNOR_LOW)
+        _camera_high_quality = False
+        _apply_camera_profile()
+        move.motorStop()
+        fuc.pause()
+        switch.set_all_switch_off()
+        pwm_led.turn_off()
+        _ws2812_turn_off()
+        _sync_distance_monitor_to_user_pref()
+    else:
+        _set_cpu_governor(_CPU_GOVERNOR_DEFAULT)
+        _apply_camera_profile()
+        _note_activity()
+        _sync_distance_monitor_to_user_pref()
+
+    payload = {
+        "evt": "system_mode",
+        "mode": normalized,
+        "previous": previous,
+        "auto": auto,
+    }
+    if reason:
+        payload["reason"] = reason
+    logger.info(payload)
+    event_bus.publish("system_mode", {"mode": normalized})
+    return True
+
+
+def _ensure_mode_initialized() -> None:
+    _set_system_mode(_system_mode, reason="startup", force=True)
+
+
+def _maybe_wake_from_standby(command_input: str) -> None:
+    if _system_mode != "STANDBY":
+        return
+    if not command_input:
+        return
+    if command_input in _MODE_COMMANDS:
+        return
+    if command_input in ("get_info", "distanceMonitorOn", "distanceMonitorOff"):
+        return
+    if command_input.startswith("mode"):
+        return
+    _set_system_mode("ACTIVE", reason="command", auto=True)
+
+
+def _command_allowed_in_eco(command_input: str) -> bool:
+    # In ECO mode all commands are allowed; hardware modules remain in low-power
+    # states by default, but explicit commands take precedence.
+    return True
+
+
+def _handle_mode_command(command_input: str) -> bool:
+    if command_input == "modeStandby":
+        _set_system_mode("STANDBY", reason="user")
+        return True
+    if command_input == "modeStability":
+        _set_system_mode("STANDBY", reason="user")
+        return True
+    if command_input == "modeActive":
+        _set_system_mode("ACTIVE", reason="user")
+        return True
+    if command_input == "modeEco":
+        _set_system_mode("ECO", reason="user")
+        return True
+    return False
 
 
 def _broadcast_distance_update(value: Optional[float], status: Optional[str] = None) -> None:
@@ -587,7 +780,7 @@ def ap_thread():
 
 
 def functionSelect(command_input, response):
-    global functionMode
+    global functionMode, _distance_user_enabled
 
     if 'findColor' == command_input:
         flask_app.modeselect('findColor')
@@ -620,11 +813,25 @@ def functionSelect(command_input, response):
         move.motorStop()
 
     elif 'distanceMonitorOn' == command_input:
-        _set_distance_monitor_enabled(True)
+        _distance_user_enabled = True
+        if _system_mode == "STANDBY":
+            _set_distance_monitor_enabled(False, remember=False)
+            logger.info({"evt": "distance_monitor_request", "status": "queued_for_active"})
+        else:
+            _set_distance_monitor_enabled(True, remember=True)
         buzzer.tick()
 
     elif 'distanceMonitorOff' == command_input:
-        _set_distance_monitor_enabled(False)
+        _distance_user_enabled = False
+        _set_distance_monitor_enabled(False, remember=True)
+        buzzer.tick()
+
+    elif 'cameraHQOn' == command_input:
+        _set_camera_high_quality(True)
+        buzzer.tick()
+
+    elif 'cameraHQOff' == command_input:
+        _set_camera_high_quality(False)
         buzzer.tick()
 
     elif 'wsStripOn' == command_input:
@@ -891,6 +1098,14 @@ def configPWM(command_input, response):
 def _process_hardware_command(command_input: str) -> None:
     try:
         logger.info({"evt": "command_queue", "cmd": command_input})
+        if isinstance(command_input, str):
+            _note_activity()
+            _maybe_wake_from_standby(command_input)
+            if _handle_mode_command(command_input):
+                return
+            if _system_mode == "ECO" and not _command_allowed_in_eco(command_input):
+                logger.info({"evt": "mode_blocked", "mode": _system_mode, "cmd": command_input})
+                return
         robotCtrl(command_input, None)
         switchCtrl(command_input, None)
         functionSelect(command_input, None)
@@ -1253,7 +1468,12 @@ async def recv_msg(websocket):
                     "display": distance_display,
                     "status": distance_status,
                 }
+                camera_meta = camera_opencv.get_stream_profile()
+                camera_meta["mode"] = _system_mode
+                camera_meta["high_quality"] = bool(_camera_high_quality and _system_mode == "ACTIVE")
+                response['camera'] = camera_meta
                 response['lights'] = _get_lighting_status()
+                response['mode'] = _system_mode
                 handled_locally = True
 
             elif data.startswith('wsB'):
@@ -1359,6 +1579,10 @@ if __name__ == '__main__':
     _broadcast_distance_update(_distance_monitor_snapshot().get("last_value"), status=_distance_monitor_status())
 
     _initialize_ws2812_driver()
+    _ensure_mode_initialized()
+
+    idle_thread = threading.Thread(target=_mode_idle_worker, name="mode_idle", daemon=True)
+    idle_thread.start()
 
     while  1:
         wifi_check()

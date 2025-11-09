@@ -16,6 +16,56 @@ import imutils
 CAMERA_BACKEND = os.getenv("CAMERA_BACKEND", "auto").strip().lower()
 CAMERA_DEVICE = os.getenv("CAMERA_DEVICE", "/dev/video0")
 
+_STANDBY_PROFILE = {"resolution": (640, 480), "delay": 0.08, "fps": 12}
+_VIDEO_PROFILES = {
+    "ACTIVE": {"resolution": (640, 480), "delay": 0.0, "fps": 30},
+    "STANDBY": _STANDBY_PROFILE,
+    "STABILITY": _STANDBY_PROFILE,
+    "ECO": {"resolution": (640, 480), "delay": 0.15, "fps": 5},
+    "ACTIVE_HIGH": {"resolution": (2304, 1296), "delay": 0.0, "fps": 60},
+}
+_current_profile = "ACTIVE"
+_profile_lock = threading.Lock()
+
+
+def set_stream_profile(name: str) -> None:
+    global _current_profile
+    if not name:
+        name = "ACTIVE"
+    name = name.upper()
+    if name == "STABILITY":
+        name = "STANDBY"
+    with _profile_lock:
+        _current_profile = name if name in _VIDEO_PROFILES else "ACTIVE"
+
+
+def _get_stream_profile() -> dict:
+    with _profile_lock:
+        profile = _VIDEO_PROFILES.get(_current_profile, _VIDEO_PROFILES["ACTIVE"]).copy()
+        profile["name"] = _current_profile
+    return profile
+
+
+def _transform_frame_for_profile(frame):
+    profile = _get_stream_profile()
+    resolution = profile.get("resolution")
+    delay = profile.get("delay", 0.0)
+    if resolution and isinstance(resolution, (tuple, list)) and len(resolution) == 2:
+        try:
+            frame = cv2.resize(frame, resolution, interpolation=cv2.INTER_AREA)
+        except Exception:
+            pass
+    return frame, max(0.0, float(delay))
+
+
+def get_stream_profile() -> dict:
+    """Expose current stream profile metadata."""
+    data = _get_stream_profile()
+    resolution = data.get("resolution") or (640, 480)
+    data["resolution"] = resolution
+    data.setdefault("fps", 30)
+    return data
+
 
 pid = PID.PID()
 pid.SetKp(0.5)
@@ -581,6 +631,12 @@ class Camera(BaseCamera):
                 except:
                     pass
             
-            if cv2.imencode('.jpg', img)[0]:
-                yield cv2.imencode('.jpg', img)[1].tobytes()
+            img, profile_delay = _transform_frame_for_profile(img)
+            encoded = cv2.imencode('.jpg', img)
+            if encoded[0]:
+                yield encoded[1].tobytes()
+            if profile_delay:
+                remaining = profile_delay - (time.time() - start_time)
+                if remaining > 0:
+                    time.sleep(remaining)
             

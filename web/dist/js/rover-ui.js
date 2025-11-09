@@ -32,10 +32,13 @@
     fcToggle: document.getElementById('fc-toggle'),
     fcColor: document.getElementById('fc-color'),
     actionButtons: Array.from(document.querySelectorAll('.action-toggle')),
+    modeButtons: Array.from(document.querySelectorAll('.mode-toggle')),
+    activeModeButton: document.querySelector('.mode-toggle[data-mode="ACTIVE"]'),
     movementButtons: Array.from(document.querySelectorAll('.pad-button')),
     utilities: Array.from(document.querySelectorAll('.secondary-button[data-command]')),
     videoImage: document.getElementById('video-stream'),
     videoRefresh: document.getElementById('refresh-video'),
+    cameraHqToggle: document.getElementById('camera-hq-toggle'),
     distanceBadge: document.getElementById('distance-overlay'),
     distanceStatusValue: document.getElementById('distance-status-value'),
     distanceStatusLabel: document.getElementById('distance-status-label'),
@@ -83,6 +86,9 @@
       ema: null,
       last: null
     },
+    systemMode: 'ACTIVE',
+    cameraHighQuality: false,
+    cameraMeta: null,
     lights: {
       stripAvailable: true
     },
@@ -191,6 +197,7 @@ function voltageToPercent (voltage) {
     setupCharts();
     setupVideo();
     setupActionButtons();
+    setupModeControls();
     setupMovementControls();
     setupSpeedControl();
     setupCvflControls();
@@ -311,6 +318,35 @@ function voltageToPercent (voltage) {
         sendCommand(active ? cmd : off);
       });
     });
+  }
+
+  function setupModeControls () {
+    elements.modeButtons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (btn.disabled) return;
+        const target = (btn.dataset.mode || '').toUpperCase();
+        if (target) {
+          state.systemMode = target;
+          updateModeButtons();
+        }
+        const command = btn.dataset.command;
+        if (command) {
+          sendCommand(command);
+        }
+      });
+    });
+
+    if (elements.cameraHqToggle) {
+      elements.cameraHqToggle.addEventListener('click', () => {
+        if (elements.cameraHqToggle.disabled) return;
+        const enable = !state.cameraHighQuality;
+        state.cameraHighQuality = enable;
+        updateHdToggle();
+        sendCommand(enable ? 'cameraHQOn' : 'cameraHQOff');
+      });
+    }
+
+    updateModeButtons();
   }
 
   function setupMovementControls () {
@@ -940,8 +976,68 @@ function voltageToPercent (voltage) {
     }
 
     updateLightingCapabilities(payload.lights);
+    syncModeState(payload);
 
     updateDistanceOverlay(distance.cm, distance.display, distance.status);
+  }
+
+  function syncModeState (payload) {
+    if (!payload) return;
+    const cameraMeta = payload.camera || null;
+    const reportedMode = (payload.mode || (cameraMeta && cameraMeta.mode) || state.systemMode || '').toUpperCase();
+    if (reportedMode) {
+      state.systemMode = reportedMode;
+    }
+    if (cameraMeta) {
+      state.cameraHighQuality = Boolean(cameraMeta.high_quality);
+      state.cameraMeta = cameraMeta;
+    }
+    updateModeButtons();
+  }
+
+  function updateModeButtons () {
+    const mode = (state.systemMode || '').toUpperCase();
+    const visualMode = mode === 'STANDBY' ? 'ACTIVE' : mode;
+    elements.modeButtons.forEach((btn) => {
+      const target = (btn.dataset.mode || '').toUpperCase();
+      const isActive = Boolean(visualMode && target === visualMode);
+      btn.classList.toggle('is-active', isActive);
+      btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
+    updateHdToggle();
+    updateActiveStandbyLabel(mode);
+    updateEcoTheme(mode === 'ECO');
+  }
+
+  function updateActiveStandbyLabel (mode) {
+    const btn = elements.activeModeButton;
+    if (!btn) return;
+    const isStandby = mode === 'STANDBY';
+    const activeLabel = btn.dataset.labelActive || 'Active';
+    const standbyLabel = btn.dataset.labelStandby || 'Standby';
+    const nextLabel = isStandby ? standbyLabel : activeLabel;
+    if (btn.textContent !== nextLabel) {
+      btn.textContent = nextLabel;
+    }
+    btn.setAttribute('title', isStandby ? 'Standby mode (auto)' : 'Active mode');
+  }
+
+  function updateEcoTheme (enabled) {
+    const body = document.body;
+    if (!body) return;
+    body.classList.toggle('eco-mode', Boolean(enabled));
+  }
+
+  function updateHdToggle () {
+    const button = elements.cameraHqToggle;
+    if (!button) return;
+    const inActiveMode = (state.systemMode || '').toUpperCase() === 'ACTIVE';
+    const enabled = inActiveMode && state.cameraHighQuality;
+    button.disabled = !inActiveMode;
+    button.classList.toggle('is-disabled', !inActiveMode);
+    button.classList.toggle('is-active', enabled);
+    button.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+    button.title = inActiveMode ? '2304×1296 @ 60fps' : 'Доступно только в режиме Active';
   }
 
   function sanitizeNumber (value) {

@@ -114,6 +114,67 @@
         border-color: rgba(17, 115, 212, 0.9);
         color: #fff;
       }
+      .header-mode {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.35rem;
+        padding: 0.45rem 0.85rem;
+        border-radius: 9999px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background-color: rgba(35, 54, 72, 0.65);
+        color: rgba(255, 255, 255, 0.75);
+        font-size: 0.7rem;
+        letter-spacing: 0.08em;
+        font-weight: 600;
+        text-transform: uppercase;
+        transition: transform 0.15s ease, background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+      }
+      .header-mode:hover,
+      .header-mode:focus-visible {
+        background-color: rgba(17, 115, 212, 0.85);
+        color: #fff;
+        border-color: rgba(17, 115, 212, 0.9);
+        outline: none;
+        transform: translateY(-1px);
+      }
+      .header-mode.is-active {
+        background: linear-gradient(135deg, #1173d4, #0f5ca9);
+        color: #fff;
+        border-color: rgba(17, 115, 212, 0.9);
+        box-shadow: 0 12px 25px rgba(17, 115, 212, 0.2);
+      }
+      .header-mode:disabled,
+      .header-mode.is-disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+        transform: none;
+        box-shadow: none;
+      }
+      body.eco-mode,
+      body.eco-mode .bg-background-dark {
+        background-color: #0b1f14 !important;
+      }
+      body.eco-mode header {
+        background-color: rgba(7, 22, 14, 0.95) !important;
+        border-color: rgba(4, 69, 34, 0.6) !important;
+      }
+      body.eco-mode .bg-panel-dark {
+        background-color: rgba(8, 34, 20, 0.95) !important;
+        border-color: rgba(4, 69, 34, 0.35) !important;
+      }
+      body.eco-mode .bg-panel-muted\/40 {
+        background-color: rgba(8, 34, 20, 0.55) !important;
+      }
+      body.eco-mode .header-mode {
+        background-color: rgba(18, 61, 36, 0.7);
+      }
+      .camera-frame {
+        aspect-ratio: 4 / 3;
+        width: 100%;
+        height: 100%;
+        min-height: 240px;
+      }
       .pad-button {
         display: inline-flex;
         align-items: center;
@@ -272,137 +333,144 @@
             <p class="text-sm text-white/60">Adeept Robot HAT Controller</p>
           </div>
         </div>
-        <div class="flex items-center gap-6">
+        <div class="flex items-center gap-6 flex-wrap justify-end">
+          <div class="flex items-center flex-wrap gap-2">
+            <button type="button" class="mode-toggle header-mode" data-mode="ACTIVE" data-command="modeActive" data-label-active="Active" data-label-standby="Standby (auto)">Active</button>
+            <button type="button" class="mode-toggle header-mode" data-mode="ECO" data-command="modeEco">Eco</button>
+            <button type="button" id="camera-hq-toggle" class="header-mode" title="2304×1296 @ 60fps (Active only)">HD+</button>
+          </div>
           <div class="flex items-center gap-2 text-sm">
             <span class="material-symbols-outlined text-green-400" id="connection-indicator">wifi_off</span>
             <span id="connection-label">Disconnected</span>
           </div>
           <button id="reconnect-button" class="hidden h-9 rounded-full border border-white/20 px-4 text-sm font-medium text-white/80 hover:border-primary hover:text-primary transition">Reconnect</button>
-          <div class="w-10 h-10 rounded-full bg-center bg-cover bg-no-repeat border border-white/10" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuB5pl4hqpLBvw5Y-RD_py503jIqey476vo_NwOHW5cER63gbefDYuuumm3x4pyneKIVTGwUPquWI8npb347Egmx3ZkrEiJ3tqaqXVg7APQTqhx9w4uvqHB1dNEqT11kNwZYlxyQGCpzClpZ0RTo-y4sjSVR3X7OmgvNHq-qOzfZFyU12gRkGcBINc86vDT2iwFpf53tTTP5xntY8H6uTjVtEFC5MxTzEjR5XaPGG9iAyZzEvVM3xggYxg_IUDbDlFUhKdYHIBNDfSg');"></div>
         </div>
       </header>
 
       <main class="flex flex-1 overflow-hidden">
-        <div class="flex flex-col gap-5 p-5 flex-1 overflow-auto scrollbar-thin lg:grid lg:grid-cols-5 lg:gap-x-5 lg:gap-y-2">
-          <section class="order-1 lg:order-1 lg:col-span-3 flex flex-col gap-5">
-            <div class="relative aspect-video rounded-xl overflow-hidden bg-black/70 border border-white/5 shadow-xl">
+        <div class="grid grid-cols-12 gap-5 p-8 flex-1 overflow-auto scrollbar-thin lg:min-h-[700px]">
+          <section class="order-1 lg:order-1 lg:col-span-6">
+            <div class="camera-frame relative rounded-xl overflow-hidden bg-black/70 border border-white/5 shadow-xl h-[60vh]">
               <div id="distance-overlay" class="hud-badge">Distance - -- cm</div>
               <div class="hud-crosshair" aria-hidden="true"></div>
               <img id="video-stream" src="" alt="Rover camera feed" class="absolute inset-0 w-full h-full object-cover bg-black select-none pointer-events-none">
             </div>
           </section>
 
-          <aside class="order-2 lg:order-3 lg:col-span-1 bg-panel-dark border border-white/5 rounded-xl p-5 flex flex-col gap-5 shadow-lg">
-            <h2 class="text-lg font-semibold">Controls</h2>
+          <section class="order-2 lg:order-1 lg:col-span-6">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              <div class="bg-panel-dark border border-white/5 rounded-xl p-5 flex flex-col gap-5 shadow-lg">
+                <h2 class="text-lg font-semibold">Controls</h2>
+                <div class="bg-panel-muted/40 border border-white/5 rounded-xl p-4 flex flex-col gap-4">
+                  <p class="text-sm text-white/70 font-medium text-center tracking-wide uppercase">Rover Movement</p>
+                  <div class="grid grid-cols-3 gap-2 w-36 mx-auto">
+                    <div></div>
+                    <button class="pad-button" data-command="forward" data-stop="DS" data-keys="KeyW,ArrowUp">W</button>
+                    <div></div>
+                    <button class="pad-button" data-command="left" data-stop="TS" data-keys="KeyA,ArrowLeft">A</button>
+                    <button class="pad-button" data-command="backward" data-stop="DS" data-keys="KeyS,ArrowDown">S</button>
+                    <button class="pad-button" data-command="right" data-stop="TS" data-keys="KeyD,ArrowRight">D</button>
+                  </div>
+                  <div class="flex flex-col gap-2">
+                    <div class="flex items-center justify-between gap-4">
+                      <span class="text-sm text-white/70 uppercase tracking-wide">Speed</span>
+                      <span id="speed-value" class="text-sm font-semibold text-white/80">100</span>
+                    </div>
+                    <input id="speed-slider" type="range" min="10" max="200" value="100" class="w-full accent-primary">
+                  </div>
+                </div>
+                <div class="bg-panel-muted/40 border border-white/5 rounded-xl p-4 space-y-4">
+                  <p class="text-sm text-white/70 font-medium text-center tracking-wide uppercase">Arm &amp; Gripper</p>
+                  <div class="grid grid-cols-2 gap-2 text-xs">
+                    <div class="arm-cluster" data-label="Gripper" data-command="grab" data-stop="GLstop" data-command-alt="loose"></div>
+                    <div class="arm-cluster" data-label="Shoulder" data-command="armUp" data-stop="armStop" data-command-alt="armDown"></div>
+                    <div class="arm-cluster" data-label="Wrist" data-command="handUp" data-stop="handStop" data-command-alt="handDown"></div>
+                    <div class="arm-cluster" data-label="Rotate" data-command="lookleft" data-stop="LRstop" data-command-alt="lookright" data-icons="arrow_back,arrow_forward"></div>
+                    <div class="arm-cluster" data-label="Camera" data-command="up" data-stop="UDstop" data-command-alt="down"></div>
+                  </div>
+                </div>
+              </div>
 
-            <div class="bg-panel-muted/40 border border-white/5 rounded-xl p-4 flex flex-col gap-4">
-              <p class="text-sm text-white/70 font-medium text-center tracking-wide uppercase">Rover Movement</p>
-              <div class="grid grid-cols-3 gap-2 w-36 mx-auto">
-                <div></div>
-                <button class="pad-button" data-command="forward" data-stop="DS" data-keys="KeyW,ArrowUp">W</button>
-                <div></div>
-                <button class="pad-button" data-command="left" data-stop="TS" data-keys="KeyA,ArrowLeft">A</button>
-                <button class="pad-button" data-command="backward" data-stop="DS" data-keys="KeyS,ArrowDown">S</button>
-                <button class="pad-button" data-command="right" data-stop="TS" data-keys="KeyD,ArrowRight">D</button>
-              </div>
-              <div class="flex flex-col gap-2">
-                <div class="flex items-center justify-between gap-4">
-                  <span class="text-sm text-white/70 uppercase tracking-wide">Speed</span>
-                  <span id="speed-value" class="text-sm font-semibold text-white/80">100</span>
-                </div>
-                <input id="speed-slider" type="range" min="10" max="200" value="100" class="w-full accent-primary">
-              </div>
-            </div>
-
-            <div class="bg-panel-muted/40 border border-white/5 rounded-xl p-4 space-y-4">
-              <p class="text-sm text-white/70 font-medium text-center tracking-wide uppercase">Arm &amp; Gripper</p>
-              <div class="grid grid-cols-2 gap-2 text-xs">
-                <div class="arm-cluster" data-label="Gripper" data-command="grab" data-stop="GLstop" data-command-alt="loose"></div>
-                <div class="arm-cluster" data-label="Shoulder" data-command="armUp" data-stop="armStop" data-command-alt="armDown"></div>
-                <div class="arm-cluster" data-label="Wrist" data-command="handUp" data-stop="handStop" data-command-alt="handDown"></div>
-                <div class="arm-cluster" data-label="Rotate" data-command="lookleft" data-stop="LRstop" data-command-alt="lookright" data-icons="arrow_back,arrow_forward"></div>
-                <div class="arm-cluster" data-label="Camera" data-command="up" data-stop="UDstop" data-command-alt="down"></div>
-              </div>
-            </div>
-
-          </aside>
-
-          <section class="order-3 lg:order-2 lg:col-span-1 flex flex-col bg-panel-dark border border-white/5 rounded-xl p-5 gap-4 shadow-lg">
-            <h2 class="text-lg font-semibold">Rover Stats</h2>
-            <div class="flex flex-col gap-4 flex-1 overflow-y-auto scrollbar-thin pr-1">
-              <div class="stat-card">
-                <div class="flex justify-between items-center mb-2">
-                  <p class="stat-title">Battery</p>
-                  <p class="stat-value"><span id="battery-percent">--</span>%</p>
-                </div>
-                <div class="h-16">
-                  <canvas id="battery-chart"></canvas>
-                </div>
-              </div>
-              <div class="stat-card">
-                <div class="flex justify-between items-center mb-2">
-                  <p class="stat-title">CPU Load</p>
-                  <p class="stat-value"><span id="cpu-usage">--</span>%</p>
-                </div>
-                <div class="h-16">
-                  <canvas id="cpu-chart"></canvas>
-                </div>
-              </div>
-              <div class="grid grid-cols-2 gap-3">
-                <div class="stat-card">
-                  <p class="stat-title">CPU Temp</p>
-                  <p class="stat-value"><span id="cpu-temp">--</span>°C</p>
-                </div>
-                <div class="stat-card">
-                  <p class="stat-title">RAM Usage</p>
-                  <p class="stat-value"><span id="ram-usage">--</span>%</p>
-                </div>
-                <div class="stat-card">
-                  <p class="stat-title">Voltage</p>
-                  <p class="stat-value"><span id="battery-voltage">--</span>V</p>
-                </div>
-                <div class="stat-card">
-                  <p class="stat-title">Connection Quality</p>
-                  <p class="stat-value"><span id="connection-quality" class="text-white/70">--</span></p>
-                </div>
-              </div>
-              <div class="stat-card">
-                <div class="flex justify-between items-center mb-2">
-                  <p class="stat-title">Distance Monitor</p>
-                  <button id="distance-settings-button" class="size-7 grid place-items-center rounded-full border border-white/15 text-white/70 hover:border-primary hover:text-primary transition">
-                    <span class="material-symbols-outlined text-base">settings</span>
-                  </button>
-                </div>
-                <p class="text-2xl font-semibold text-white/90">Distance: <span id="distance-status-value">--</span> cm</p>
-                <p class="text-xs text-white/60 mt-1">Status: <span id="distance-status-label">Disabled</span></p>
-                <div id="distance-settings-panel" class="hidden mt-3 rounded-lg border border-white/10 bg-panel-muted/40 p-3 space-y-2 text-xs text-white/70">
-                  <label class="flex items-center justify-between gap-3">
-                    <span>Enable ultrasonic sensor</span>
-                    <input id="distance-toggle" type="checkbox" class="h-4 w-7 accent-primary">
-                  </label>
-                  <p class="text-[11px] text-white/50 leading-snug">When enabled, readings pause automatically after 60s of no movement.</p>
-                </div>
-              </div>
-              <div class="stat-card space-y-2">
-                <p class="stat-title">Gyroscope (°/s)</p>
-                <div class="grid grid-cols-3 gap-2 text-xs">
-                  <div class="axis-chip">X <span id="gyro-x">--</span></div>
-                  <div class="axis-chip">Y <span id="gyro-y">--</span></div>
-                  <div class="axis-chip">Z <span id="gyro-z">--</span></div>
-                </div>
-              </div>
-              <div class="stat-card space-y-2">
-                <p class="stat-title">Accelerometer (g)</p>
-                <div class="grid grid-cols-3 gap-2 text-xs">
-                  <div class="axis-chip">X <span id="accel-x">--</span></div>
-                  <div class="axis-chip">Y <span id="accel-y">--</span></div>
-                  <div class="axis-chip">Z <span id="accel-z">--</span></div>
+              <div class="bg-panel-dark border border-white/5 rounded-xl p-5 flex flex-col gap-4 shadow-lg">
+                <h2 class="text-lg font-semibold">Rover Stats</h2>
+                <div class="grid grid-cols-1 gap-4">
+                  <div class="stat-card">
+                    <div class="flex justify-between items-center mb-2">
+                      <p class="stat-title">Battery</p>
+                      <p class="stat-value"><span id="battery-percent">--</span>%</p>
+                    </div>
+                    <div class="h-12">
+                      <canvas id="battery-chart"></canvas>
+                    </div>
+                  </div>
+                  <div class="stat-card">
+                    <div class="flex justify-between items-center mb-2">
+                      <p class="stat-title">CPU Load</p>
+                      <p class="stat-value"><span id="cpu-usage">--</span>%</p>
+                    </div>
+                    <div class="h-12">
+                      <canvas id="cpu-chart"></canvas>
+                    </div>
+                  </div>
+                  <div class="grid grid-cols-2 gap-3">
+                    <div class="stat-card">
+                      <p class="stat-title">CPU Temp</p>
+                      <p class="stat-value"><span id="cpu-temp">--</span>°C</p>
+                    </div>
+                    <div class="stat-card">
+                      <p class="stat-title">RAM Usage</p>
+                      <p class="stat-value"><span id="ram-usage">--</span>%</p>
+                    </div>
+                    <div class="stat-card">
+                      <p class="stat-title">Voltage</p>
+                      <p class="stat-value"><span id="battery-voltage">--</span>V</p>
+                    </div>
+                    <div class="stat-card">
+                      <p class="stat-title">Connection Quality</p>
+                      <p class="stat-value"><span id="connection-quality" class="text-white/70">--</span></p>
+                    </div>
+                  </div>
+                  <div class="stat-card">
+                    <div class="flex justify-between items-center mb-2">
+                      <p class="stat-title">Distance Monitor</p>
+                      <button id="distance-settings-button" class="size-7 grid place-items-center rounded-full border border-white/15 text-white/70 hover:border-primary hover:text-primary transition">
+                        <span class="material-symbols-outlined text-base">settings</span>
+                      </button>
+                    </div>
+                    <p class="text-2xl font-semibold text-white/90">Distance: <span id="distance-status-value">--</span> cm</p>
+                    <p class="text-xs text-white/60 mt-1">Status: <span id="distance-status-label">Disabled</span></p>
+                    <div id="distance-settings-panel" class="hidden mt-3 rounded-lg border border-white/10 bg-panel-muted/40 p-3 space-y-2 text-xs text-white/70">
+                      <label class="flex items-center justify-between gap-3">
+                        <span>Enable ultrasonic sensor</span>
+                        <input id="distance-toggle" type="checkbox" class="h-4 w-7 accent-primary">
+                      </label>
+                      <p class="text-[11px] text-white/50 leading-snug">When enabled, readings pause automatically after 60s of no movement.</p>
+                    </div>
+                  </div>
+                  <div class="grid grid-cols-2 gap-3">
+                    <div class="stat-card space-y-2">
+                      <p class="text-sm font-medium uppercase tracking-wide text-white/60">Gyroscope (°/s)</p>
+                      <div class="grid grid-cols-3 gap-2 text-xs">
+                        <div class="axis-chip">X <span id="gyro-x">--</span></div>
+                        <div class="axis-chip">Y <span id="gyro-y">--</span></div>
+                        <div class="axis-chip">Z <span id="gyro-z">--</span></div>
+                      </div>
+                    </div>
+                    <div class="stat-card space-y-2">
+                      <p class="text-sm font-medium uppercase tracking-wide text-white/60">Accelerometer (g)</p>
+                      <div class="grid grid-cols-3 gap-2 text-xs">
+                        <div class="axis-chip">X <span id="accel-x">--</span></div>
+                        <div class="axis-chip">Y <span id="accel-y">--</span></div>
+                        <div class="axis-chip">Z <span id="accel-z">--</span></div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
           </section>
 
-          <section class="order-4 lg:order-4 lg:col-span-3">
+          <section class="order-3 lg:order-2 lg:col-span-12">
             <div class="bg-panel-dark border border-white/5 rounded-xl p-6 shadow-lg flex flex-col gap-6">
               <div class="flex items-center justify-between">
                 <h2 class="text-lg font-semibold">Settings</h2>
@@ -426,7 +494,7 @@
                     <p class="text-white/70 text-sm font-medium uppercase tracking-wide">Lighting</p>
                     <div class="grid grid-cols-1 gap-2">
                       <button class="action-toggle" data-action="ledOn" data-off="ledOff">Headlight LED</button>
-                        <button class="action-toggle" data-action="wsStripOn" data-off="wsStripOff" data-light="strip">LED Strip</button>
+                      <button class="action-toggle" data-action="wsStripOn" data-off="wsStripOff" data-light="strip">LED Strip</button>
                     </div>
                   </div>
                 </div>
@@ -458,11 +526,15 @@
                             <input id="cvfl-l2" type="range" min="0" max="480" value="440">
                           </label>
                           <label class="slider-field">
-                            <span>SP</span>
-                            <input id="cvfl-sp" type="range" min="0" max="200" value="20">
+                            <span>Speed</span>
+                            <input id="cvfl-sp" type="range" min="10" max="200" value="120">
                           </label>
                         </div>
-                        <button id="cvfl-color-toggle" class="secondary-button w-full">Color: <span id="cvfl-color-label">#FFFFFF</span></button>
+                        <div class="flex items-center justify-between text-sm text-white/70">
+                          <span>Color inversion</span>
+                          <button id="cvfl-color-toggle" class="secondary-button px-3 py-1 text-xs">Toggle</button>
+                        </div>
+                        <p id="cvfl-color-label" class="text-xs text-white/60 text-center uppercase tracking-wide">#FFFFFF</p>
                       </div>
                     </div>
                   </div>
