@@ -69,6 +69,16 @@ _WS2812_STATUS = {
 
 _distance_lock = threading.Lock()
 _distance_state = {"value": None, "timestamp": 0.0}
+_distance_event_lock = threading.Lock()
+_distance_event_state = {"value": None, "timestamp": 0.0, "status": None}
+_DISTANCE_IDLE_TIMEOUT = float(os.getenv("DISTANCE_IDLE_TIMEOUT", "60"))
+_distance_monitor_lock = threading.Lock()
+_distance_monitor_state = {
+    "enabled": True,
+    "paused": False,
+    "last_motion_ts": time.time(),
+    "last_value": None,
+}
 
 _COMMAND_EXECUTOR = ThreadPoolExecutor(max_workers=1)
 _shoulder_state = {
@@ -387,16 +397,153 @@ def _get_distance_snapshot() -> tuple[Optional[float], float]:
         return _distance_state["value"], _distance_state["timestamp"]
 
 
+def _distance_monitor_snapshot() -> dict:
+    with _distance_monitor_lock:
+        return dict(_distance_monitor_state)
+
+
+def _distance_monitor_status(snapshot: Optional[dict] = None) -> str:
+    if snapshot is None:
+        snapshot = _distance_monitor_snapshot()
+    if not snapshot.get("enabled"):
+        return "disabled"
+    if snapshot.get("paused"):
+        return "paused"
+    return "active"
+
+
+def _set_distance_monitor_enabled(enabled: bool) -> None:
+    with _distance_monitor_lock:
+        previous = _distance_monitor_state["enabled"]
+        if previous == enabled:
+            snapshot = dict(_distance_monitor_state)
+        else:
+            _distance_monitor_state["enabled"] = enabled
+            if enabled:
+                _distance_monitor_state["paused"] = False
+                _distance_monitor_state["last_motion_ts"] = time.time()
+            else:
+                _distance_monitor_state["paused"] = True
+            snapshot = dict(_distance_monitor_state)
+    if previous != enabled:
+        value = snapshot.get("last_value") if enabled else None
+        status = _distance_monitor_status(snapshot)
+        logger.info({"evt": "distance_monitor_toggle", "enabled": enabled})
+        _broadcast_distance_update(value, status=status)
+
+
+def _set_distance_monitor_paused(paused: bool) -> None:
+    with _distance_monitor_lock:
+        if not _distance_monitor_state["enabled"] and not paused:
+            return
+        previous = _distance_monitor_state["paused"]
+        if previous == paused:
+            return
+        _distance_monitor_state["paused"] = paused
+        snapshot = dict(_distance_monitor_state)
+    _broadcast_distance_update(snapshot.get("last_value"), status=_distance_monitor_status(snapshot))
+
+
+def _note_distance_motion(active: bool) -> None:
+    if not active:
+        return
+    with _distance_monitor_lock:
+        _distance_monitor_state["last_motion_ts"] = time.time()
+        if not (_distance_monitor_state["enabled"] and _distance_monitor_state["paused"]):
+            return
+        _distance_monitor_state["paused"] = False
+        snapshot = dict(_distance_monitor_state)
+    _broadcast_distance_update(snapshot.get("last_value"), status=_distance_monitor_status(snapshot))
+
+
+def _maybe_pause_distance_monitor(now: float) -> bool:
+    with _distance_monitor_lock:
+        if (
+            _distance_monitor_state["enabled"]
+            and not _distance_monitor_state["paused"]
+            and now - _distance_monitor_state["last_motion_ts"] >= _DISTANCE_IDLE_TIMEOUT
+        ):
+            _distance_monitor_state["paused"] = True
+            snapshot = dict(_distance_monitor_state)
+        else:
+            return False
+    _broadcast_distance_update(snapshot.get("last_value"), status=_distance_monitor_status(snapshot))
+    return True
+
+
 def _distance_worker(poll_interval: float = 0.1) -> None:
     while True:
         try:
+            snapshot = _distance_monitor_snapshot()
+            status = _distance_monitor_status(snapshot)
+            if status == "disabled":
+                time.sleep(poll_interval)
+                continue
+            now = time.time()
+            if status == "active" and _maybe_pause_distance_monitor(now):
+                time.sleep(poll_interval)
+                continue
+            snapshot = _distance_monitor_snapshot()
+            status = _distance_monitor_status(snapshot)
+            if status != "active":
+                time.sleep(poll_interval)
+                continue
             measurement = ultra.checkdist()
             if measurement is not None and math.isfinite(measurement):
                 value = max(0.0, float(measurement))
+                with _distance_monitor_lock:
+                    _distance_monitor_state["last_value"] = value
+                    snapshot = dict(_distance_monitor_state)
                 _update_distance_cache(value)
+                _broadcast_distance_update(value, status=_distance_monitor_status(snapshot))
+            else:
+                _broadcast_distance_update(None)
         except Exception as exc:
             logger.debug({"evt": "ultrasonic_read_error", "error": str(exc)})
         time.sleep(poll_interval)
+
+
+def _distance_motion_listener() -> None:
+    queue = event_bus.listen()
+    while True:
+        message = queue.get()
+        if message.get("type") != "drive_motion":
+            continue
+        payload = message.get("payload") or {}
+        _note_distance_motion(bool(payload.get("active")))
+
+
+def _broadcast_distance_update(value: Optional[float], status: Optional[str] = None) -> None:
+    now = time.time()
+    payload_value = None if value is None else round(float(value), 2)
+    resolved_status = status or _distance_monitor_status()
+    with _distance_event_lock:
+        last_value = _distance_event_state["value"]
+        last_ts = _distance_event_state["timestamp"]
+        last_status = _distance_event_state.get("status")
+        if resolved_status == last_status:
+            if payload_value is None and last_value is None and now - last_ts < 1.0:
+                return
+            if (
+                payload_value is not None
+                and last_value is not None
+                and abs(last_value - payload_value) < 0.5
+                and now - last_ts < 0.2
+            ):
+                return
+        _distance_event_state["value"] = payload_value
+        _distance_event_state["timestamp"] = now
+        _distance_event_state["status"] = resolved_status
+    display = "--" if payload_value is None else f"{payload_value:.1f}"
+    if resolved_status == "disabled":
+        display = "--"
+    try:
+        event_bus.publish(
+            "distance_update",
+            {"cm": payload_value, "display": display, "status": resolved_status, "ts": now},
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug({"evt": "distance_event_error", "error": str(exc)})
 
 
 def _get_lighting_status() -> dict:
@@ -470,6 +617,14 @@ def functionSelect(command_input, response):
         move.motorStop()
         time.sleep(0.3)
         move.motorStop()
+
+    elif 'distanceMonitorOn' == command_input:
+        _set_distance_monitor_enabled(True)
+        buzzer.tick()
+
+    elif 'distanceMonitorOff' == command_input:
+        _set_distance_monitor_enabled(False)
+        buzzer.tick()
 
     elif 'wsStripOn' == command_input:
         if _ws2812_set_color(0, 90, 255):
@@ -1006,6 +1161,7 @@ async def recv_msg(websocket):
                 percentage_num = None
                 distance_cm = None
                 distance_display = "--"
+                distance_status = _distance_monitor_status()
                 cached_distance, _cached_ts = _get_distance_snapshot()
                 if cached_distance is not None:
                     distance_cm = cached_distance
@@ -1022,7 +1178,7 @@ async def recv_msg(websocket):
                             percentage_str = f"{int(round(percentage_num))}"
                     except Exception as exc:
                         logger.warning({"evt": "battery_read_error", "error": str(exc)})
-                if distance_cm is None:
+                if distance_cm is None and distance_status == "active":
                     try:
                         dist_measurement = ultra.checkdist()
                         if dist_measurement is not None:
@@ -1090,6 +1246,7 @@ async def recv_msg(websocket):
                 response['distance'] = {
                     "cm": distance_cm,
                     "display": distance_display,
+                    "status": distance_status,
                 }
                 response['lights'] = _get_lighting_status()
                 handled_locally = True
@@ -1187,6 +1344,9 @@ if __name__ == '__main__':
 
     distance_thread = threading.Thread(target=_distance_worker, name="distance_worker", daemon=True)
     distance_thread.start()
+    motion_thread = threading.Thread(target=_distance_motion_listener, name="distance_motion", daemon=True)
+    motion_thread.start()
+    _broadcast_distance_update(_distance_monitor_snapshot().get("last_value"), status=_distance_monitor_status())
 
     _initialize_ws2812_driver()
 

@@ -37,6 +37,9 @@
     videoImage: document.getElementById('video-stream'),
     videoRefresh: document.getElementById('refresh-video'),
     distanceBadge: document.getElementById('distance-overlay'),
+    distanceStatusValue: document.getElementById('distance-status-value'),
+    distanceStatusLabel: document.getElementById('distance-status-label'),
+    distanceButton: document.querySelector('[data-action="distanceMonitorOn"]'),
     stripButton: document.querySelector('[data-light="strip"]'),
     calibrationModal: document.getElementById('calibration-modal'),
     calibrationBase: document.getElementById('calibration-base'),
@@ -50,6 +53,7 @@
 
   const state = {
     ws: null,
+    eventSource: null,
     connected: false,
     reconnectTimer: null,
     batteryHistory: Array(60).fill(0),
@@ -79,7 +83,8 @@
     },
     lights: {
       stripAvailable: true
-    }
+    },
+    distanceStatus: 'disabled'
   };
 
   const armMappings = [
@@ -192,6 +197,7 @@ function voltageToPercent (voltage) {
     setupUtilities();
     setupCalibration();
     setupWebSocket();
+    setupEvents();
     setupConnectionQualityMonitor();
     startInfoPolling();
     updateConnection(false);
@@ -718,6 +724,35 @@ function voltageToPercent (voltage) {
     connect();
   }
 
+  function setupEvents () {
+    if (!window.EventSource) return;
+    if (state.eventSource) {
+      try { state.eventSource.close(); } catch (err) {}
+      state.eventSource = null;
+    }
+    try {
+      const source = new EventSource('/api/events');
+      state.eventSource = source;
+      source.addEventListener('distance_update', (event) => {
+        try {
+          const payload = JSON.parse(event.data || '{}');
+          updateDistanceOverlay(payload.cm, payload.display, payload.status);
+        } catch (error) {
+          console.warn('distance_update parse failed', error);
+        }
+      });
+      source.addEventListener('error', () => {
+        try { source.close(); } catch (err) {}
+        if (state.eventSource === source) {
+          state.eventSource = null;
+        }
+        window.setTimeout(setupEvents, 3000);
+      });
+    } catch (error) {
+      console.warn('Failed to establish SSE stream', error);
+    }
+  }
+
   function updateConnection (connected) {
     state.connected = connected;
     if (connected) {
@@ -757,6 +792,58 @@ function voltageToPercent (voltage) {
       state.lastInfoReceived = Date.now();
       updateConnectionQuality();
     }
+  }
+
+  function updateDistanceOverlay (cm, display, status) {
+    const resolvedStatus = status || state.distanceStatus || 'disabled';
+    state.distanceStatus = resolvedStatus;
+    const numericValue = Number.isFinite(cm) ? Number(cm) : null;
+    const displayValue = (typeof display === 'number' && Number.isFinite(display))
+      ? Number(display).toFixed(1)
+      : (typeof display === 'string' ? display : '--');
+    let badgeText = 'Distance - -- cm';
+    let statValue = '--';
+    if (resolvedStatus !== 'disabled') {
+      if (numericValue !== null) {
+        const formatted = numericValue.toFixed(1);
+        badgeText = `Distance - ${formatted} cm`;
+        statValue = formatted;
+      } else if (displayValue && displayValue !== '--') {
+        badgeText = `Distance - ${displayValue} cm`;
+        statValue = displayValue;
+      }
+    }
+    if (elements.distanceBadge) {
+      elements.distanceBadge.textContent = badgeText;
+    }
+    if (elements.distanceStatusValue) {
+      elements.distanceStatusValue.textContent = statValue;
+    }
+    if (elements.distanceStatusLabel) {
+      elements.distanceStatusLabel.textContent = formatDistanceStatus(resolvedStatus);
+    }
+    syncDistanceButton(resolvedStatus);
+  }
+
+  function formatDistanceStatus (status) {
+    switch (status) {
+      case 'active':
+        return 'Active';
+      case 'paused':
+        return 'Paused';
+      case 'disabled':
+        return 'Disabled';
+      default:
+        return 'Unknown';
+    }
+  }
+
+  function syncDistanceButton (status) {
+    const btn = elements.distanceButton;
+    if (!btn) return;
+    const active = status && status !== 'disabled';
+    state.actionStates.distanceMonitorOn = active;
+    btn.classList.toggle('is-active', active);
   }
 
   function applyStats (payload) {
@@ -823,15 +910,7 @@ function voltageToPercent (voltage) {
 
     updateLightingCapabilities(payload.lights);
 
-    if (elements.distanceBadge) {
-      let badgeText = 'Distance: -- cm';
-      if (Number.isFinite(distance.cm)) {
-        badgeText = `Distance: ${distance.cm.toFixed(1)} cm`;
-      } else if (distance.display && distance.display !== '--') {
-        badgeText = `Distance: ${distance.display} cm`;
-      }
-      elements.distanceBadge.textContent = badgeText;
-    }
+    updateDistanceOverlay(distance.cm, distance.display, distance.status);
   }
 
   function sanitizeNumber (value) {

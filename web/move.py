@@ -8,6 +8,11 @@
 import time
 
 try:
+    from events import event_bus as _event_bus
+except Exception:
+    _event_bus = None
+
+try:
     from board import SCL, SDA
     import busio
     from adafruit_pca9685 import PCA9685 as AdafruitPCA9685
@@ -160,6 +165,7 @@ def motorStop():  # Motor stops
         motor3.throttle = 0
     if motor4:
         motor4.throttle = 0
+    _publish_motion_event(False)
 
 
 def Motor(channel, direction, motor_speed):
@@ -190,20 +196,21 @@ def move(speed, direction, turn, radius=0.6):   # 0 < radius <= 1
     # speed:0~100. direction:-1. turn: "no".
     if speed == 0:
         motorStop()  # all motor stop.
-    else:
-        if direction == 1:           # forward
-            if turn == 'left':       # left forward
-                Motor(1, -M1_Direction, speed)
-                Motor(2, M2_Direction, speed)
-            elif turn == 'right':    # right forward
-                Motor(1, M1_Direction, speed)
-                Motor(2, -M2_Direction, speed)
-            else:                    # forward  (mid)
-                Motor(1, M1_Direction, speed)
-                Motor(2, M2_Direction, speed)
-        elif direction == -1:        # backward
+        return
+    if direction == 1:           # forward
+        if turn == 'left':       # left forward
             Motor(1, -M1_Direction, speed)
+            Motor(2, M2_Direction, speed)
+        elif turn == 'right':    # right forward
+            Motor(1, M1_Direction, speed)
             Motor(2, -M2_Direction, speed)
+        else:                    # forward  (mid)
+            Motor(1, M1_Direction, speed)
+            Motor(2, M2_Direction, speed)
+    elif direction == -1:        # backward
+        Motor(1, -M1_Direction, speed)
+        Motor(2, -M2_Direction, speed)
+    _publish_motion_event(True)
 
 
 def destroy():
@@ -221,39 +228,50 @@ def destroy():
 def trackingMove(speed, direction, turn, radius=0.6):   # 0 < radius <= 1
     if speed == 0:
         motorStop()
-    else:
-        if direction == 1:
-            if turn == 'left':
-                Motor(1, -M1_Direction, speed + TL_LEFT_Offset)
-                Motor(2, 0, speed + TL_RIGHT_Offset)
-            elif turn == 'right':
-                Motor(1, 0, speed)
-                Motor(2, -M2_Direction, speed + TL_RIGHT_Offset)
-            else:
-                Motor(1, M1_Direction, speed + TL_LEFT_Offset)
-                Motor(2, M2_Direction, speed + TL_RIGHT_Offset)
-        elif direction == -1:
+        return
+    if direction == 1:
+        if turn == 'left':
             Motor(1, -M1_Direction, speed + TL_LEFT_Offset)
+            Motor(2, 0, speed + TL_RIGHT_Offset)
+        elif turn == 'right':
+            Motor(1, 0, speed)
             Motor(2, -M2_Direction, speed + TL_RIGHT_Offset)
+        else:
+            Motor(1, M1_Direction, speed + TL_LEFT_Offset)
+            Motor(2, M2_Direction, speed + TL_RIGHT_Offset)
+    elif direction == -1:
+        Motor(1, -M1_Direction, speed + TL_LEFT_Offset)
+        Motor(2, -M2_Direction, speed + TL_RIGHT_Offset)
+    _publish_motion_event(True)
 
 
 def video_Tracking_Move(speed, direction, turn, radius=0):
     if speed == 0:
         motorStop()
-    else:
-        if direction == 1:
-            if turn == 'left':
-                Motor(1, -M1_Direction, speed)
-                Motor(2, M2_Direction, speed * radius)
-            elif turn == 'right':
-                Motor(1, M1_Direction, speed * radius)
-                Motor(2, -M2_Direction, speed)
-            else:
-                Motor(1, M1_Direction, speed)
-                Motor(2, M2_Direction, speed)
-        elif direction == -1:
+        return
+    if direction == 1:
+        if turn == 'left':
             Motor(1, -M1_Direction, speed)
+            Motor(2, M2_Direction, speed * radius)
+        elif turn == 'right':
+            Motor(1, M1_Direction, speed * radius)
             Motor(2, -M2_Direction, speed)
+        else:
+            Motor(1, M1_Direction, speed)
+            Motor(2, M2_Direction, speed)
+    elif direction == -1:
+        Motor(1, -M1_Direction, speed)
+        Motor(2, -M2_Direction, speed)
+    _publish_motion_event(True)
+
+
+def _publish_motion_event(active: bool) -> None:
+    if _event_bus is None:
+        return
+    try:
+        _event_bus.publish("drive_motion", {"active": bool(active)})
+    except Exception:
+        pass
 
 
 if __name__ == '__main__':

@@ -103,16 +103,26 @@ class Functions(threading.Thread):
 
 	
 # Filter out occasional incorrect distance data.
-	def distRedress(self): 
+	def distRedress(self):
 		mark = 0
-		distValue = ultra.checkdist()
+		distValue = None
+		timeout = time.time() + 1.5
 		while True:
-			distValue = ultra.checkdist()
-			if distValue > 900:
-				mark +=  1
-			elif mark > 5 or distValue < 900:
+			sample = ultra.checkdist()
+			if sample is None:
+				if time.time() >= timeout:
 					break
-			print(distValue)
+				time.sleep(0.05)
+				continue
+			timeout = time.time() + 1.0
+			distValue = sample
+			if distValue > 900:
+				mark += 1
+			elif mark > 5 or distValue < 900:
+				break
+			time.sleep(0.02)
+		if distValue is None:
+			return 999.0
 		return round(distValue,2)
 
 	def automaticProcessing(self):
@@ -151,6 +161,9 @@ class Functions(threading.Thread):
 
 	def keepDisProcessing(self):
 		distanceGet = ultra.checkdist()
+		if distanceGet is None:
+			move.motorStop()
+			return
 		if distanceGet > (self.rangeKeep/2+0.1):
 			move.move(KD_Speed, 1, "mid")
 		elif distanceGet < (self.rangeKeep/2-0.1):

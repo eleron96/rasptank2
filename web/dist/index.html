@@ -286,7 +286,7 @@
         <div class="flex flex-col gap-5 p-5 flex-1 overflow-auto scrollbar-thin lg:grid lg:grid-cols-5 lg:gap-x-5 lg:gap-y-2">
           <section class="order-1 lg:order-1 lg:col-span-3 flex flex-col gap-5">
             <div class="relative aspect-video rounded-xl overflow-hidden bg-black/70 border border-white/5 shadow-xl">
-              <div id="distance-overlay" class="hud-badge">Distance: -- cm</div>
+              <div id="distance-overlay" class="hud-badge">Distance - -- cm</div>
               <div class="hud-crosshair" aria-hidden="true"></div>
               <img id="video-stream" src="" alt="Rover camera feed" class="absolute inset-0 w-full h-full object-cover bg-black select-none pointer-events-none">
             </div>
@@ -366,6 +366,13 @@
                   <p class="stat-value"><span id="connection-quality" class="text-white/70">--</span></p>
                 </div>
               </div>
+              <div class="stat-card">
+                <div class="flex justify-between items-center mb-2">
+                  <p class="stat-title">Distance Monitor</p>
+                  <p class="stat-value"><span id="distance-status-value">--</span> cm</p>
+                </div>
+                <p class="text-xs text-white/60">Status: <span id="distance-status-label">Disabled</span></p>
+              </div>
               <div class="stat-card space-y-2">
                 <p class="stat-title">Gyroscope (°/s)</p>
                 <div class="grid grid-cols-3 gap-2 text-xs">
@@ -403,6 +410,7 @@
                       <button class="action-toggle" data-action="motionGet" data-off="stopCV">Motion Get</button>
                       <button class="action-toggle" data-action="automatic" data-off="automaticOff">Auto Matic</button>
                       <button class="action-toggle" data-action="trackLine" data-off="trackLineOff">Track Line</button>
+                      <button class="action-toggle" data-action="distanceMonitorOn" data-off="distanceMonitorOff">Distance Monitor</button>
                     </div>
                   </div>
                   <div class="space-y-3">
