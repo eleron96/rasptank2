@@ -82,6 +82,8 @@ _distance_monitor_state = {
     "last_motion_ts": time.time(),
     "last_value": None,
 }
+_headlight_lock = threading.Lock()
+_headlight_enabled = False
 
 _COMMAND_EXECUTOR = ThreadPoolExecutor(max_workers=1)
 _shoulder_state = {
@@ -249,6 +251,31 @@ def log_led_action(action, **extra):
     payload = {"evt": "led_action", "action": action}
     payload.update(extra)
     logger.info(payload)
+
+
+def _set_headlight_state(enabled: bool, *, reason: str) -> bool:
+    """Toggle the headlight LED with a single point of control."""
+    global _headlight_enabled
+    target = bool(enabled)
+    with _headlight_lock:
+        if target == _headlight_enabled:
+            return False
+        try:
+            if target:
+                pwm_led.turn_on()
+            else:
+                pwm_led.turn_off()
+        except Exception as exc:  # pragma: no cover - defensive log
+            logger.warning({
+                "evt": "headlight_error",
+                "enabled": target,
+                "reason": reason,
+                "error": str(exc),
+            })
+            return False
+        _headlight_enabled = target
+    log_led_action("ledOn" if target else "ledOff", reason=reason)
+    return True
 
 
 def _initialize_ws2812_driver(force: bool = False) -> bool:
@@ -635,7 +662,7 @@ def _set_system_mode(mode: str, reason: Optional[str] = None, auto: bool = False
         move.motorStop()
         fuc.pause()
         switch.set_all_switch_off()
-        pwm_led.turn_off()
+        _set_headlight_state(False, reason="mode_" + normalized.lower())
         _ws2812_turn_off()
         _set_distance_monitor_enabled(False, remember=False)
     elif normalized == "ECO":
@@ -645,7 +672,7 @@ def _set_system_mode(mode: str, reason: Optional[str] = None, auto: bool = False
         move.motorStop()
         fuc.pause()
         switch.set_all_switch_off()
-        pwm_led.turn_off()
+        _set_headlight_state(False, reason="mode_" + normalized.lower())
         _ws2812_turn_off()
         _sync_distance_monitor_to_user_pref()
     else:
@@ -888,13 +915,11 @@ def switchCtrl(command_input, response):
         switch.switch(3,0) 
 
     elif 'ledOn' == command_input:
-        log_led_action('ledOn')
-        pwm_led.turn_on()
+        _set_headlight_state(True, reason='command_ledOn')
         buzzer.tick()
 
     elif 'ledOff' == command_input:
-        log_led_action('ledOff')
-        pwm_led.turn_off()
+        _set_headlight_state(False, reason='command_ledOff')
         buzzer.tick()
 
 

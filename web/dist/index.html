@@ -37,9 +37,157 @@
         }
       };
     </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/granim/2.0.0/granim.min.js" integrity="sha512-0dZ0pniS3pSke1Mt2rt7NmBGG99nmCaTKty+O+kO5OVwOB1p5MNDoAuCEi0aKBslZx2drXr/7EQo1leChX2NDw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <style>
+      :root {
+        --sweep-position: -20%;
+        --sweep-width: 18%;
+        --eco-sweep-position: -40%;
+        --eco-sweep-width: 45%;
+      }
+      .glass-panel {
+        background-color: rgba(15, 23, 42, 0.75);
+        backdrop-filter: blur(18px) saturate(140%);
+        -webkit-backdrop-filter: blur(18px) saturate(140%);
+        border-color: rgba(255, 255, 255, 0.08);
+        box-shadow: 0 20px 45px rgba(0, 0, 0, 0.35);
+      }
+      .glass-panel-light {
+        background-color: rgba(30, 41, 59, 0.5);
+        backdrop-filter: blur(22px) saturate(140%);
+        -webkit-backdrop-filter: blur(22px) saturate(140%);
+        border-color: rgba(255, 255, 255, 0.07);
+        box-shadow: 0 18px 32px rgba(0, 0, 0, 0.3);
+      }
+      body.eco-mode .glass-panel {
+        background-color: rgba(12, 48, 28, 0.65);
+        border-color: rgba(197, 255, 210, 0.25);
+      }
+      body.eco-mode .glass-panel-light {
+        background-color: rgba(18, 66, 40, 0.5);
+        border-color: rgba(182, 255, 201, 0.2);
+      }
+      .bg-stage-parallax {
+        transform: translateZ(0);
+      }
       body {
         font-family: "Space Grotesk", system-ui, sans-serif;
+      }
+      .bg-stage {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        z-index: -1;
+        pointer-events: none;
+        overflow: hidden;
+        transition: opacity 0.6s ease;
+      }
+      .bg-stage-eco {
+        opacity: 0;
+      }
+      body.eco-mode .bg-stage-eco {
+        opacity: 1;
+      }
+      body.eco-mode .bg-stage-dark {
+        opacity: 0;
+      }
+      #bg-dark,
+      #bg-eco {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+      .bg-layer {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+      .bg-stage-dark .sweep {
+        pointer-events: none;
+        mix-blend-mode: screen;
+        opacity: 0.35;
+        filter: blur(60px);
+      }
+      .sweep-dark-one {
+        background: linear-gradient(25deg,
+          rgba(255, 80, 180, 0) 0%,
+          rgba(255, 80, 180, 0.1) calc(var(--sweep-position) - var(--sweep-width)),
+          rgba(0, 128, 255, 0.55) var(--sweep-position),
+          rgba(0, 255, 180, 0.35) calc(var(--sweep-position) + var(--sweep-width)),
+          rgba(255, 80, 180, 0) 100%);
+        animation: sweepX 18s linear infinite;
+      }
+      .sweep-dark-two {
+        opacity: 0.25;
+        background: linear-gradient(-30deg,
+          rgba(255, 120, 0, 0) 0%,
+          rgba(255, 120, 0, 0.12) calc(var(--sweep-position) - var(--sweep-width)),
+          rgba(255, 200, 0, 0.45) var(--sweep-position),
+          rgba(0, 128, 255, 0.35) calc(var(--sweep-position) + var(--sweep-width)),
+          rgba(255, 120, 0, 0) 100%);
+        animation: sweepX 22s linear infinite;
+        animation-delay: -10s;
+      }
+      @keyframes sweepX {
+        0% { --sweep-position: -20%; }
+        100% { --sweep-position: 120%; }
+      }
+      .vignette-dark {
+        pointer-events: none;
+        background: radial-gradient(120% 120% at 50% 50%, rgba(0,0,0,0) 0%, rgba(0,0,0,0.25) 70%, rgba(0,0,0,0.6) 100%);
+        mix-blend-mode: multiply;
+      }
+      .bg-stage-eco .sweep {
+        pointer-events: none;
+        mix-blend-mode: screen;
+        opacity: 1;
+        filter: blur(50px) saturate(200%) brightness(130%);
+        animation: ecoBreathe 12s ease-in-out infinite;
+      }
+      .sweep-eco-one {
+        background: linear-gradient(30deg,
+          rgba(255,255,180,0.3) 0%,
+          rgba(180,255,200,0.6) calc(var(--eco-sweep-position) - var(--eco-sweep-width)),
+          rgba(70,240,130,1) var(--eco-sweep-position),
+          rgba(0,200,255,1) calc(var(--eco-sweep-position) + var(--eco-sweep-width)),
+          rgba(255,210,100,0.9) calc(var(--eco-sweep-position) + var(--eco-sweep-width) * 2),
+          rgba(255,255,180,0.3) 100%);
+        background-size: 200% 200%;
+        animation: ecoWave 16s ease-in-out infinite;
+      }
+      .sweep-eco-two {
+        opacity: 0.95;
+        background: linear-gradient(-35deg,
+          rgba(230,255,240,0.3) 0%,
+          rgba(140,255,210,0.6) calc(var(--eco-sweep-position) - var(--eco-sweep-width)),
+          rgba(50,220,140,1) var(--eco-sweep-position),
+          rgba(0,180,255,1) calc(var(--eco-sweep-position) + var(--eco-sweep-width)),
+          rgba(255,200,100,0.9) calc(var(--eco-sweep-position) + var(--eco-sweep-width) * 2),
+          rgba(230,255,240,0.3) 100%);
+        background-size: 200% 200%;
+        animation: ecoWaveReverse 20s ease-in-out infinite;
+      }
+      @keyframes ecoWave {
+        0% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
+      }
+      @keyframes ecoWaveReverse {
+        0% { background-position: 100% 50%; }
+        50% { background-position: 0% 50%; }
+        100% { background-position: 100% 50%; }
+      }
+      @keyframes ecoBreathe {
+        0%, 100% { filter: blur(50px) saturate(160%) brightness(115%) opacity(0.85); }
+        50% { filter: blur(35px) saturate(240%) brightness(150%) opacity(1); }
+      }
+      .vignette-eco {
+        pointer-events: none;
+        background: radial-gradient(120% 120% at 50% 50%, rgba(255,255,255,0) 0%, rgba(255,255,255,0.4) 60%, rgba(160,210,180,0.55) 100%);
+        mix-blend-mode: screen;
       }
       .material-symbols-outlined {
         font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
@@ -153,21 +301,14 @@
       }
       body.eco-mode,
       body.eco-mode .bg-background-dark {
-        background-color: #0b1f14 !important;
+        background-color: #08130c !important;
       }
       body.eco-mode header {
-        background-color: rgba(7, 22, 14, 0.95) !important;
-        border-color: rgba(4, 69, 34, 0.6) !important;
-      }
-      body.eco-mode .bg-panel-dark {
-        background-color: rgba(8, 34, 20, 0.95) !important;
-        border-color: rgba(4, 69, 34, 0.35) !important;
-      }
-      body.eco-mode .bg-panel-muted\/40 {
-        background-color: rgba(8, 34, 20, 0.55) !important;
+        background-color: rgba(9, 35, 21, 0.85) !important;
+        border-color: rgba(60, 152, 96, 0.35) !important;
       }
       body.eco-mode .header-mode {
-        background-color: rgba(18, 61, 36, 0.7);
+        background-color: rgba(18, 78, 44, 0.65);
       }
       .camera-frame {
         aspect-ratio: 4 / 3;
@@ -322,6 +463,18 @@
     </style>
   </head>
   <body class="bg-background-dark text-white min-h-screen">
+    <div class="bg-stage bg-stage-dark bg-stage-parallax" aria-hidden="true">
+      <canvas id="bg-dark"></canvas>
+      <div class="bg-layer sweep-dark-one"></div>
+      <div class="bg-layer sweep-dark-two"></div>
+      <div class="bg-layer vignette-dark"></div>
+    </div>
+    <div class="bg-stage bg-stage-eco bg-stage-parallax" aria-hidden="true">
+      <canvas id="bg-eco"></canvas>
+      <div class="bg-layer sweep-eco-one"></div>
+      <div class="bg-layer sweep-eco-two"></div>
+      <div class="bg-layer vignette-eco"></div>
+    </div>
     <div class="flex flex-col min-h-screen">
       <header class="flex items-center justify-between gap-6 border-b border-panel-muted/70 px-8 py-4 bg-background-dark">
         <div class="flex items-center gap-4">
@@ -359,9 +512,9 @@
 
           <section class="order-2 lg:order-1 lg:col-span-6">
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
-              <div class="bg-panel-dark border border-white/5 rounded-xl p-5 flex flex-col gap-5 shadow-lg">
+              <div class="glass-panel border rounded-xl p-5 flex flex-col gap-5 shadow-lg">
                 <h2 class="text-lg font-semibold">Controls</h2>
-                <div class="bg-panel-muted/40 border border-white/5 rounded-xl p-4 flex flex-col gap-4">
+                <div class="glass-panel-light border rounded-xl p-4 flex flex-col gap-4">
                   <p class="text-sm text-white/70 font-medium text-center tracking-wide uppercase">Rover Movement</p>
                   <div class="grid grid-cols-3 gap-2 w-36 mx-auto">
                     <div></div>
@@ -379,7 +532,7 @@
                     <input id="speed-slider" type="range" min="10" max="200" value="100" class="w-full accent-primary">
                   </div>
                 </div>
-                <div class="bg-panel-muted/40 border border-white/5 rounded-xl p-4 space-y-4">
+                <div class="glass-panel-light border rounded-xl p-4 space-y-4">
                   <p class="text-sm text-white/70 font-medium text-center tracking-wide uppercase">Arm &amp; Gripper</p>
                   <div class="grid grid-cols-2 gap-2 text-xs">
                     <div class="arm-cluster" data-label="Gripper" data-command="grab" data-stop="GLstop" data-command-alt="loose"></div>
@@ -391,10 +544,10 @@
                 </div>
               </div>
 
-              <div class="bg-panel-dark border border-white/5 rounded-xl p-5 flex flex-col gap-4 shadow-lg">
+              <div class="glass-panel border rounded-xl p-5 flex flex-col gap-4 shadow-lg">
                 <h2 class="text-lg font-semibold">Rover Stats</h2>
                 <div class="grid grid-cols-1 gap-4">
-                  <div class="stat-card">
+                  <div class="glass-panel-light border rounded-xl p-4">
                     <div class="flex justify-between items-center mb-2">
                       <p class="stat-title">Battery</p>
                       <p class="stat-value"><span id="battery-percent">--</span>%</p>
@@ -403,7 +556,7 @@
                       <canvas id="battery-chart"></canvas>
                     </div>
                   </div>
-                  <div class="stat-card">
+                  <div class="glass-panel-light border rounded-xl p-4">
                     <div class="flex justify-between items-center mb-2">
                       <p class="stat-title">CPU Load</p>
                       <p class="stat-value"><span id="cpu-usage">--</span>%</p>
@@ -413,24 +566,24 @@
                     </div>
                   </div>
                   <div class="grid grid-cols-2 gap-3">
-                    <div class="stat-card">
+                    <div class="glass-panel-light border rounded-xl p-4">
                       <p class="stat-title">CPU Temp</p>
                       <p class="stat-value"><span id="cpu-temp">--</span>°C</p>
                     </div>
-                    <div class="stat-card">
+                    <div class="glass-panel-light border rounded-xl p-4">
                       <p class="stat-title">RAM Usage</p>
                       <p class="stat-value"><span id="ram-usage">--</span>%</p>
                     </div>
-                    <div class="stat-card">
+                    <div class="glass-panel-light border rounded-xl p-4">
                       <p class="stat-title">Voltage</p>
                       <p class="stat-value"><span id="battery-voltage">--</span>V</p>
                     </div>
-                    <div class="stat-card">
+                    <div class="glass-panel-light border rounded-xl p-4">
                       <p class="stat-title">Connection Quality</p>
                       <p class="stat-value"><span id="connection-quality" class="text-white/70">--</span></p>
                     </div>
                   </div>
-                  <div class="stat-card">
+                  <div class="glass-panel-light border rounded-xl p-4">
                     <div class="flex justify-between items-center mb-2">
                       <p class="stat-title">Distance Monitor</p>
                       <button id="distance-settings-button" class="size-7 grid place-items-center rounded-full border border-white/15 text-white/70 hover:border-primary hover:text-primary transition">
@@ -448,7 +601,7 @@
                     </div>
                   </div>
                   <div class="grid grid-cols-2 gap-3">
-                    <div class="stat-card space-y-2">
+                    <div class="glass-panel-light border rounded-xl p-4 space-y-2">
                       <p class="text-sm font-medium uppercase tracking-wide text-white/60">Gyroscope (°/s)</p>
                       <div class="grid grid-cols-3 gap-2 text-xs">
                         <div class="axis-chip">X <span id="gyro-x">--</span></div>
@@ -456,7 +609,7 @@
                         <div class="axis-chip">Z <span id="gyro-z">--</span></div>
                       </div>
                     </div>
-                    <div class="stat-card space-y-2">
+                    <div class="glass-panel-light border rounded-xl p-4 space-y-2">
                       <p class="text-sm font-medium uppercase tracking-wide text-white/60">Accelerometer (g)</p>
                       <div class="grid grid-cols-3 gap-2 text-xs">
                         <div class="axis-chip">X <span id="accel-x">--</span></div>
@@ -471,7 +624,7 @@
           </section>
 
           <section class="order-3 lg:order-2 lg:col-span-12">
-            <div class="bg-panel-dark border border-white/5 rounded-xl p-6 shadow-lg flex flex-col gap-6">
+            <div class="glass-panel border rounded-xl p-6 shadow-lg flex flex-col gap-6">
               <div class="flex items-center justify-between">
                 <h2 class="text-lg font-semibold">Settings</h2>
                 <button id="open-calibration" class="inline-flex items-center gap-2 rounded-full border border-white/15 px-4 py-1.5 text-xs uppercase tracking-wide text-white/70 hover:border-primary hover:text-primary transition">
@@ -480,11 +633,11 @@
                 </button>
               </div>
 
-              <div class="grid lg:grid-cols-3 gap-5">
-                <div class="space-y-5">
-                  <div class="space-y-3">
+                <div class="grid lg:grid-cols-3 gap-5">
+                  <div class="space-y-5">
+                    <div class="space-y-3">
                     <p class="text-white/70 text-sm font-medium uppercase tracking-wide">Actions</p>
-                    <div class="grid grid-cols-1 gap-2">
+                    <div class="glass-panel-light border rounded-xl p-4 grid grid-cols-1 gap-2">
                       <button class="action-toggle" data-action="motionGet" data-off="stopCV">Motion Get</button>
                       <button class="action-toggle" data-action="automatic" data-off="automaticOff">Auto Matic</button>
                       <button class="action-toggle" data-action="trackLine" data-off="trackLineOff">Track Line</button>
@@ -492,7 +645,7 @@
                   </div>
                   <div class="space-y-3">
                     <p class="text-white/70 text-sm font-medium uppercase tracking-wide">Lighting</p>
-                    <div class="grid grid-cols-1 gap-2">
+                    <div class="glass-panel-light border rounded-xl p-4 grid grid-cols-1 gap-2">
                       <button class="action-toggle" data-action="ledOn" data-off="ledOff">Headlight LED</button>
                       <button class="action-toggle" data-action="wsStripOn" data-off="wsStripOff" data-light="strip">LED Strip</button>
                     </div>
@@ -503,7 +656,7 @@
                   <div class="grid lg:grid-cols-2 gap-5">
                     <div class="space-y-3">
                       <p class="text-white/70 text-sm font-medium uppercase tracking-wide">FC Control</p>
-                      <div class="space-y-3 bg-panel-muted/40 border border-white/5 rounded-lg p-4">
+                      <div class="glass-panel-light border rounded-lg p-4 space-y-3">
                         <button id="fc-toggle" class="primary-button w-full">Start</button>
                         <label class="flex items-center justify-between gap-4 text-sm text-white/70">
                           <span>Color</span>
@@ -514,7 +667,7 @@
 
                     <div class="space-y-3">
                       <p class="text-white/70 text-sm font-medium uppercase tracking-wide">CVFL Control</p>
-                      <div class="space-y-4 bg-panel-muted/40 border border-white/5 rounded-lg p-4">
+                      <div class="glass-panel-light border rounded-lg p-4 space-y-4">
                         <button id="cvfl-toggle" class="primary-button w-full">Start</button>
                         <div class="space-y-3">
                           <label class="slider-field">

@@ -92,7 +92,11 @@
     lights: {
       stripAvailable: true
     },
-    distanceStatus: 'disabled'
+    distanceStatus: 'disabled',
+    gradient: {
+      dark: { instance: null, currentState: null },
+      eco: { instance: null, currentState: null }
+    }
   };
 
   const armMappings = [
@@ -196,6 +200,8 @@ function voltageToPercent (voltage) {
     loadBatteryMetadata();
     setupCharts();
     setupVideo();
+    setupGradientBackground();
+    setupParallaxBackground();
     setupActionButtons();
     setupModeControls();
     setupMovementControls();
@@ -342,6 +348,7 @@ function voltageToPercent (voltage) {
         const enable = !state.cameraHighQuality;
         state.cameraHighQuality = enable;
         updateHdToggle();
+        updateGradientTheme();
         sendCommand(enable ? 'cameraHQOn' : 'cameraHQOff');
       });
     }
@@ -1007,6 +1014,7 @@ function voltageToPercent (voltage) {
     updateHdToggle();
     updateActiveStandbyLabel(mode);
     updateEcoTheme(mode === 'ECO');
+    updateGradientTheme();
   }
 
   function updateActiveStandbyLabel (mode) {
@@ -1026,6 +1034,108 @@ function voltageToPercent (voltage) {
     const body = document.body;
     if (!body) return;
     body.classList.toggle('eco-mode', Boolean(enabled));
+  }
+
+  function setupGradientBackground () {
+    if (typeof window.Granim !== 'function') return;
+    const darkCanvas = document.getElementById('bg-dark');
+    if (darkCanvas) {
+      state.gradient.dark.instance = new window.Granim({
+        element: '#bg-dark',
+        direction: 'diagonal',
+        isPausedWhenNotInView: true,
+        stateTransitionSpeed: 900,
+        states: {
+          'dark-default': {
+            gradients: [
+              ['#000000', '#0d0f12'],
+              ['#0f1015', '#15202c'],
+              ['#101722', '#1a2533'],
+              ['#162031', '#223649']
+            ],
+            transitionSpeed: 10000
+          },
+          'dark-accent': {
+            gradients: [
+              ['#05060a', '#15202c'],
+              ['#0d0f12', '#1c2b3d'],
+              ['#101722', '#26394f']
+            ],
+            transitionSpeed: 14000
+          }
+        }
+      });
+    }
+    const ecoCanvas = document.getElementById('bg-eco');
+    if (ecoCanvas) {
+      state.gradient.eco.instance = new window.Granim({
+        element: '#bg-eco',
+        direction: 'diagonal',
+        isPausedWhenNotInView: true,
+        stateTransitionSpeed: 900,
+        states: {
+          'eco-default': {
+            gradients: [
+              ['#D4FBCF', '#9EF0B3'],
+              ['#B2F2B0', '#72E2B5'],
+              ['#C8FCD6', '#4DD6C0'],
+              ['#D7FBE8', '#60E0D0'],
+              ['#E3FFD5', '#8FFBC2'],
+              ['#C6F6D3', '#59E7D9']
+            ],
+            transitionSpeed: 5000
+          },
+          'eco-breath': {
+            gradients: [
+              ['#C6F6D3', '#59E7D9'],
+              ['#E3FFD5', '#8FFBC2'],
+              ['#D7FBE8', '#60E0D0'],
+              ['#C8FCD6', '#4DD6C0']
+            ],
+            transitionSpeed: 7000
+          }
+        }
+      });
+    }
+    updateGradientTheme();
+  }
+
+  function updateGradientTheme () {
+    const mode = (state.systemMode || '').toUpperCase();
+    const ecoMode = mode === 'ECO';
+    const palette = ecoMode ? state.gradient.eco : state.gradient.dark;
+    if (!palette || !palette.instance) return;
+    let target = ecoMode ? 'eco-default' : 'dark-default';
+    if (!ecoMode && state.cameraHighQuality) {
+      target = 'dark-accent';
+    } else if (ecoMode && state.cameraHighQuality) {
+      target = 'eco-breath';
+    }
+    if (palette.currentState === target) return;
+    try {
+      window.requestAnimationFrame(() => {
+        palette.instance.changeState(target);
+        palette.currentState = target;
+      });
+    } catch (error) {}
+  }
+
+  function setupParallaxBackground () {
+    const stages = Array.from(document.querySelectorAll('.bg-stage'));
+    if (!stages.length) return;
+    const strength = 12;
+    const updateTransform = (event) => {
+      const { innerWidth, innerHeight } = window;
+      const relX = (event.clientX / innerWidth) - 0.5;
+      const relY = (event.clientY / innerHeight) - 0.5;
+      stages.forEach((stage, index) => {
+        const depth = (index + 1) * 0.6;
+        const offsetX = -(relX * strength) / depth;
+        const offsetY = -(relY * strength) / depth;
+        stage.style.transform = `translate3d(${offsetX}px, ${offsetY}px, 0)`;
+      });
+    };
+    window.addEventListener('pointermove', updateTransform);
   }
 
   function updateHdToggle () {
