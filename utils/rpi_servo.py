@@ -20,7 +20,7 @@ except Exception:
     AdafruitPCA9685 = None
     _HAVE_ADAFRUIT = False
 
-from pca9685_driver import _SMBusPCA9685, angle_to_us, announce_driver, us_to_ticks
+from utils.pca9685_driver import _SMBusPCA9685, angle_to_us, announce_driver, us_to_ticks
 
 
 _PCA9685_DEFAULT_ADDR = 0x5F

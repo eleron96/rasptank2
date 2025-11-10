@@ -2,7 +2,7 @@
 """Utility to drive an LED on a PCA9685 servo channel."""
 import os
 
-from pca9685_driver import _SMBusPCA9685, announce_driver
+from utils.pca9685_driver import _SMBusPCA9685, announce_driver
 
 try:
     from board import SCL, SDA

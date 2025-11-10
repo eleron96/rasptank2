@@ -9,6 +9,7 @@ services:
     image: rasptank2:latest
     container_name: rasptank2
     restart: unless-stopped
+    command: ["python", "main.py"]
     privileged: true
     networks:
       - rasptank-net

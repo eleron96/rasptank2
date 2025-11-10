@@ -7,12 +7,12 @@ from flask import Flask, Response, send_from_directory, jsonify, request
 from flask_cors import *
 # import camera driver
 
-from camera_opencv import Camera
+from modules.camera import Camera
 import threading
 
-import battery_monitor
-import servo_calibration
-from events import event_bus
+from modules import battery_monitor
+from modules import servo_calibration
+from core.events import event_bus
 
 # Raspberry Pi camera module (requires picamera package)
 # from camera_pi import Camera

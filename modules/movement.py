@@ -8,7 +8,7 @@
 import time
 
 try:
-    from events import event_bus as _event_bus
+    from core.events import event_bus as _event_bus
 except Exception:
     _event_bus = None
 
@@ -25,7 +25,7 @@ except Exception:
     adafruit_motor = None
     _HAVE_ADAFRUIT = False
 
-from pca9685_driver import _SMBusPCA9685, announce_driver
+from utils.pca9685_driver import _SMBusPCA9685, announce_driver
 
 MOTOR_M1_IN1 = 15      # Define the positive pole of M1
 MOTOR_M1_IN2 = 14      # Define the negative pole of M1

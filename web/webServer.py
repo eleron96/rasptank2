@@ -11,25 +11,23 @@ import math
 import glob
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
-import move
 import os
-import info
-import imu_sensor
-import RPIservo
-
-import functions
-import robotLight
-import ws2812_spi
-import switch
-import buzzer
-import pwm_led
-import battery_monitor
-import servo_calibration
 import socket
-import ultra
-import camera_opencv
-from events import event_bus
-from pca9685_driver import angle_to_us
+
+from core.events import event_bus
+from modules import automation as functions
+from modules import battery_monitor
+from modules import camera as camera_opencv
+from modules import imu_sensor
+from modules import servo_calibration
+from modules import ultra
+from modules import movement as move
+from modules.lighting import LightingController
+from utils import buzzer
+from utils import info
+from utils import switch
+from utils import rpi_servo as RPIservo
+from utils.pca9685_driver import angle_to_us
 
 #websocket
 import asyncio
@@ -37,7 +35,7 @@ import websockets
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 
 import json
-import app
+from . import app
 
 OLED_connection = 0
 
@@ -53,22 +51,7 @@ LVC_DISABLED = os.getenv("SHOULDER_LVC_DISABLE", "1").strip() in ("1", "true", "
 LVC_LOWER_V = float(os.getenv("SHOULDER_LVC_LOWER", "6.0"))
 LVC_UPPER_V = float(os.getenv("SHOULDER_LVC_UPPER", "6.2"))
 LVC_EMA_ALPHA = float(os.getenv("SHOULDER_LVC_ALPHA", "0.2"))
-WS2812_DRIVER = os.getenv("WS2812_DRIVER", "auto").strip().lower()
-WS2812_LED_COUNT = int(os.getenv("WS2812_LED_COUNT", "16"))
-WS2812_BRIGHTNESS = int(os.getenv("WS2812_BRIGHTNESS", "255"))
-WS2812_ALLOW_PI5 = os.getenv("WS2812_ALLOW_PI5", "0").strip().lower() in ("1", "true", "on", "yes")
-
 logger = logging.getLogger("rasptank")
-
-WS2812 = None
-WS2812_mark = None
-_WS2812_INIT_LOCK = threading.Lock()
-_WS2812_STATUS = {
-    "checked": False,
-    "supported": False,
-    "reason": None,
-    "driver": None,
-}
 
 _distance_lock = threading.Lock()
 _distance_state = {"value": None, "timestamp": 0.0}
@@ -82,9 +65,6 @@ _distance_monitor_state = {
     "last_motion_ts": time.time(),
     "last_value": None,
 }
-_headlight_lock = threading.Lock()
-_headlight_enabled = False
-
 _COMMAND_EXECUTOR = ThreadPoolExecutor(max_workers=1)
 _shoulder_state = {
     "mode": "IDLE",
@@ -145,6 +125,8 @@ H2_sc.start()
 G_sc = RPIservo.ServoCtrl()
 G_sc.start()
 G_sc.set_direction(3, -1)
+
+lighting = LightingController()
 
 def _clamp_speed(value, minimum=1, maximum=10):
     return max(minimum, min(maximum, value))
@@ -251,194 +233,6 @@ def log_led_action(action, **extra):
     payload = {"evt": "led_action", "action": action}
     payload.update(extra)
     logger.info(payload)
-
-
-def _set_headlight_state(enabled: bool, *, reason: str) -> bool:
-    """Toggle the headlight LED with a single point of control."""
-    global _headlight_enabled
-    target = bool(enabled)
-    with _headlight_lock:
-        if target == _headlight_enabled:
-            return False
-        try:
-            if target:
-                pwm_led.turn_on()
-            else:
-                pwm_led.turn_off()
-        except Exception as exc:  # pragma: no cover - defensive log
-            logger.warning({
-                "evt": "headlight_error",
-                "enabled": target,
-                "reason": reason,
-                "error": str(exc),
-            })
-            return False
-        _headlight_enabled = target
-    log_led_action("ledOn" if target else "ledOff", reason=reason)
-    return True
-
-
-def _initialize_ws2812_driver(force: bool = False) -> bool:
-    global WS2812, WS2812_mark
-    state = _WS2812_STATUS
-    if state["checked"] and not state["supported"] and not force:
-        return False
-    if WS2812 is not None and WS2812_mark == 1 and not force:
-        return True
-
-    with _WS2812_INIT_LOCK:
-        state = _WS2812_STATUS
-        if state["checked"] and not state["supported"] and not force:
-            return False
-        if WS2812 is not None and WS2812_mark == 1 and not force:
-            return True
-
-        try:
-            robotlight_check = robotLight.check_rpi_model()
-            driver_pref = (WS2812_DRIVER or "auto").strip().lower()
-            driver_queue = []
-            if driver_pref in ("auto", "spi"):
-                driver_queue.append("spi")
-            if driver_pref in ("auto", "pwm"):
-                driver_queue.append("pwm")
-            if not driver_queue:
-                driver_queue.extend(["spi", "pwm"])
-
-            if robotlight_check == 5 and not WS2812_ALLOW_PI5 and "spi" not in driver_queue:
-                logger.warning({"evt": "ws2812_unsupported_pi5"})
-                WS2812 = None
-                WS2812_mark = 0
-                state.update({"checked": True, "supported": False, "reason": "unsupported_pi5", "driver": None})
-                return False
-
-            last_error = None
-            for driver in driver_queue:
-                try:
-                    if driver == "spi":
-                        candidate = ws2812_spi.WS2812SPI(
-                            count=WS2812_LED_COUNT,
-                            brightness=WS2812_BRIGHTNESS,
-                        )
-                        candidate.start()
-                        candidate.setColor(70, 70, 255)
-                    else:
-                        candidate = robotLight.RobotWS2812()
-                        candidate.start()
-                        if hasattr(candidate, "breath"):
-                            candidate.breath(70, 70, 255)
-                        else:
-                            candidate.setColor(70, 70, 255)
-                    WS2812 = candidate
-                    WS2812_mark = 1
-                    logger.info({"evt": "ws2812_init", "driver": driver})
-                    state.update({"checked": True, "supported": True, "reason": None, "driver": driver})
-                    return True
-                except Exception as exc:
-                    last_error = exc
-                    logger.warning({"evt": "ws2812_init_failed", "driver": driver, "error": str(exc)})
-            WS2812 = None
-            WS2812_mark = 0
-            if last_error:
-                logger.warning({"evt": "ws2812_init_error", "error": str(last_error)})
-            state.update({"checked": True, "supported": False, "reason": "init_failed", "driver": None})
-            return False
-        except Exception as exc:
-            logger.warning({"evt": "ws2812_init_error", "error": str(exc)})
-            WS2812 = None
-            WS2812_mark = 0
-            state.update({"checked": True, "supported": False, "reason": "init_error", "driver": None})
-            return False
-
-
-def _ws2812_available() -> bool:
-    state = _WS2812_STATUS
-    if state["checked"] and not state["supported"]:
-        return False
-    if WS2812 is not None and WS2812_mark == 1:
-        return True
-    return _initialize_ws2812_driver()
-
-
-def _ws2812_apply_color(r: int, g: int, b: int) -> bool:
-    controller = globals().get("WS2812")
-    if controller is None:
-        return False
-    candidates = [
-        getattr(controller, "setColor", None),
-        getattr(controller, "set_all_led_color_data", None),
-        getattr(controller, "set_all_led_color", None),
-    ]
-    for func in candidates:
-        if callable(func):
-            try:
-                func(r, g, b)
-                return True
-            except Exception as exc:
-                logger.warning(
-                    {"evt": "ws2812_apply_color_failed", "method": getattr(func, "__name__", str(func)), "error": str(exc)}
-                )
-    return False
-
-
-def _ws2812_set_color(r: int, g: int, b: int) -> bool:
-    if not _ws2812_available():
-        logger.debug({"evt": "ws2812_unavailable", "action": "set_color", "reason": _WS2812_STATUS.get("reason")})
-        return False
-    controller = globals().get("WS2812")
-    if controller is None:
-        return False
-
-    try:
-        pause = getattr(controller, "pause", None)
-        if callable(pause):
-            pause()
-    except Exception as exc:
-        logger.debug({"evt": "ws2812_pause_failed", "error": str(exc)})
-
-    if not _ws2812_apply_color(r, g, b):
-        logger.warning({"evt": "ws2812_set_color_failed", "error": "no applicable color writer"})
-        return False
-
-    show = getattr(controller, "show", None)
-    if callable(show):
-        try:
-            show()
-        except TypeError:
-            show(1)
-    return True
-
-
-def _ws2812_turn_off() -> bool:
-    if not _ws2812_available():
-        logger.debug({"evt": "ws2812_unavailable", "action": "turn_off", "reason": _WS2812_STATUS.get("reason")})
-        return False
-    try:
-        controller = globals().get("WS2812")
-        if controller is None:
-            return False
-        pause = getattr(controller, "pause", None)
-        if callable(pause):
-            try:
-                pause()
-            except Exception as exc:
-                logger.debug({"evt": "ws2812_pause_failed", "error": str(exc)})
-
-        if not _ws2812_apply_color(0, 0, 0):
-            logger.warning({"evt": "ws2812_zero_failed", "error": "no applicable color writer"})
-            fallback = getattr(controller, "set_all_led_color_data", None) or getattr(controller, "set_all_led_color", None)
-            if callable(fallback):
-                fallback(0, 0, 0)
-
-        show = getattr(controller, "show", None)
-        if callable(show):
-            try:
-                show()
-            except TypeError:
-                show(1)
-    except Exception as exc:
-        logger.warning({"evt": "ws2812_off_failed", "error": str(exc)})
-        return False
-    return True
 
 
 def _update_distance_cache(value: Optional[float]) -> None:
@@ -662,7 +456,7 @@ def _set_system_mode(mode: str, reason: Optional[str] = None, auto: bool = False
         move.motorStop()
         fuc.pause()
         switch.set_all_switch_off()
-        _ws2812_turn_off()
+        lighting.strip_off()
         _set_distance_monitor_enabled(False, remember=False)
     elif normalized == "ECO":
         _set_cpu_governor(_CPU_GOVERNOR_LOW)
@@ -671,7 +465,7 @@ def _set_system_mode(mode: str, reason: Optional[str] = None, auto: bool = False
         move.motorStop()
         fuc.pause()
         switch.set_all_switch_off()
-        _ws2812_turn_off()
+        lighting.strip_off()
         _sync_distance_monitor_to_user_pref()
     else:
         _set_cpu_governor(_CPU_GOVERNOR_DEFAULT)
@@ -765,13 +559,6 @@ def _broadcast_distance_update(value: Optional[float], status: Optional[str] = N
         logger.debug({"evt": "distance_event_error", "error": str(exc)})
 
 
-def _get_lighting_status() -> dict:
-    return {
-        "strip_available": bool(WS2812_mark == 1 and _WS2812_STATUS.get("supported")),
-        "strip_reason": _WS2812_STATUS.get("reason"),
-        "strip_driver": _WS2812_STATUS.get("driver"),
-    }
-
 def servoPosInit():
     scGear.initConfig(0,init_pwm0,1)
     P_sc.initConfig(1,init_pwm1,1)
@@ -831,7 +618,7 @@ def functionSelect(command_input, response):
             fuc.pause()
 
     elif 'automaticOff' == command_input:
-        _ws2812_turn_off()
+        lighting.strip_off()
         fuc.pause()
         move.motorStop()
         time.sleep(0.3)
@@ -860,18 +647,16 @@ def functionSelect(command_input, response):
         buzzer.tick()
 
     elif 'wsStripOn' == command_input:
-        if _ws2812_set_color(0, 90, 255):
-            log_led_action('wsStripOn', color=[0, 90, 255])
+        if lighting.set_strip_color((0, 90, 255)):
             buzzer.tick()
         else:
-            logger.warning({"evt": "ws_strip_failed", "action": "on", "reason": _WS2812_STATUS.get("reason")})
+            logger.warning({"evt": "ws_strip_failed", "action": "on"})
 
     elif 'wsStripOff' == command_input:
-        if _ws2812_turn_off():
-            log_led_action('wsStripOff')
+        if lighting.strip_off():
             buzzer.tick()
         else:
-            logger.warning({"evt": "ws_strip_failed", "action": "off", "reason": _WS2812_STATUS.get("reason")})
+            logger.warning({"evt": "ws_strip_failed", "action": "off"})
 
     elif 'trackLine' == command_input:
         servoPosInit()
@@ -913,11 +698,11 @@ def switchCtrl(command_input, response):
         switch.switch(3,0) 
 
     elif 'ledOn' == command_input:
-        _set_headlight_state(True, reason='command_ledOn')
+        lighting.set_headlight(True, reason='command_ledOn')
         buzzer.tick()
 
     elif 'ledOff' == command_input:
-        _set_headlight_state(False, reason='command_ledOff')
+        lighting.set_headlight(False, reason='command_ledOff')
         buzzer.tick()
 
 
@@ -1351,7 +1136,7 @@ def wifi_check():
         ap_threading=threading.Thread(target=ap_thread)   #Define a thread for data receiving
         ap_threading.setDaemon(True)                          #'True' means it is a front thread,it would close when the mainloop() closes
         ap_threading.start()                                  #Thread starts
-        _ws2812_set_color(0,16,50)
+        lighting.set_strip_color((0,16,50))
         time.sleep(1)
 
 async def check_permit(websocket):
@@ -1495,7 +1280,7 @@ async def recv_msg(websocket):
                 camera_meta["mode"] = _system_mode
                 camera_meta["high_quality"] = bool(_camera_high_quality and _system_mode == "ACTIVE")
                 response['camera'] = camera_meta
-                response['lights'] = _get_lighting_status()
+                response['lights'] = lighting.get_status()
                 response['mode'] = _system_mode
                 handled_locally = True
 
@@ -1567,7 +1352,7 @@ async def main_logic(websocket, path):
     except ConnectionClosedError as exc:
         logger.info({"evt": "ws_session_error", "code": getattr(exc, "code", None), "reason": getattr(exc, "reason", None)})
 
-if __name__ == '__main__':
+def main() -> None:
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
     logging.basicConfig(
         level=getattr(logging, log_level, logging.INFO),
@@ -1579,14 +1364,12 @@ if __name__ == '__main__':
     switch.set_all_switch_off()
     
     move.setup()
-    WS2812_mark = None
-
     HOST = ''
     PORT = 10223                              #Define port serial 
     BUFSIZ = 1024                             #Define buffer size
     ADDR = (HOST, PORT)
 
-    global flask_app
+    global flask_app, battery
     flask_app = app.webapp()
     flask_app.startthread()
 
@@ -1601,7 +1384,6 @@ if __name__ == '__main__':
     motion_thread.start()
     _broadcast_distance_update(_distance_monitor_snapshot().get("last_value"), status=_distance_monitor_status())
 
-    _initialize_ws2812_driver()
     _ensure_mode_initialized()
 
     idle_thread = threading.Thread(target=_mode_idle_worker, name="mode_idle", daemon=True)
@@ -1617,16 +1399,16 @@ if __name__ == '__main__':
             break
         except Exception as e:
             logger.error({"evt": "ws_server_error", "error": str(e)})
-            _ws2812_turn_off()
+            lighting.strip_off()
 
-        try:
-            if WS2812_mark == 1:
-                _ws2812_set_color(0,80,255)
-        except Exception:
-            pass
+        lighting.set_strip_color((0, 80, 255))
     try:
         asyncio.get_event_loop().run_forever()
     except Exception as e:
         logger.error({"evt": "ws_loop_error", "error": str(e)})
-        _ws2812_turn_off()
+        lighting.strip_off()
         move.destroy()
+
+
+if __name__ == '__main__':
+    main()

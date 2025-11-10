@@ -5,10 +5,11 @@
 # Date		: 2024/03/10
 import time
 import threading
-import ultra
-import move
-import RPIservo
 from gpiozero import InputDevice
+
+from utils import rpi_servo as RPIservo
+from . import ultra
+from . import movement as move
 
 scGear = RPIservo.ServoCtrl()
 scGear.start()

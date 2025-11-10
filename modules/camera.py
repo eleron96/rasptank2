@@ -2,17 +2,18 @@
 # coding: utf-8
 import os
 import cv2
-from base_camera import BaseCamera
-import RPIservo
 import numpy as np
-import move
-import switch
 import datetime
-import Kalman_filter
-import PID
 import time
 import threading
 import imutils
+
+from utils.base_camera import BaseCamera
+from utils import rpi_servo as RPIservo
+from utils import switch
+from utils import kalman_filter as Kalman_filter
+from utils import pid as PID
+from . import movement as move
 CAMERA_BACKEND = os.getenv("CAMERA_BACKEND", "auto").strip().lower()
 CAMERA_DEVICE = os.getenv("CAMERA_DEVICE", "/dev/video0")
 

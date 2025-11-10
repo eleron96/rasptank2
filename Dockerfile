@@ -69,4 +69,4 @@ RUN pip install --upgrade pip && \
 
 
 EXPOSE 5000 8888
-CMD ["python", "web/webServer.py"]
+CMD ["python", "main.py"]

@@ -2,7 +2,7 @@
 """Interactive helper to calibrate the battery monitor scaling."""
 import sys
 
-from battery_monitor import calibrate_to_voltage, get_calibration, sample_status
+from modules.battery_monitor import calibrate_to_voltage, get_calibration, sample_status
 
 
 def _print_status() -> None:

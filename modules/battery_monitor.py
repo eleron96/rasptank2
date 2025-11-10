@@ -59,7 +59,7 @@ _CAL_LOCK = threading.Lock()
 # Track live monitor instances so calibration changes propagate immediately.
 _ACTIVE_MONITORS = weakref.WeakSet()
 try:
-    from events import event_bus
+    from core.events import event_bus
 except Exception:
     event_bus = None
 

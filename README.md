@@ -54,6 +54,8 @@ This repository hosts the control software for the RaspTank2 tracked rover: Web 
 6. Inspect logs when needed: `docker compose logs -f rasptank2` and `docker compose logs -f nginx`.
 
 ### Option B: Native installation (runs directly on Raspberry Pi OS)
+
+> **Shortcut:** run `sudo python3 scripts/setup_hat.py --auto-reboot` to perform the steps below automatically. The helper installs apt/pip dependencies, prepares `create_ap`, and wires the new `main.py` entrypoint into `/etc/rc.local`. Use `--help` to tweak behaviour.
 1. Install OS-level dependencies:
    ```bash
    sudo apt update
@@ -85,9 +87,9 @@ This repository hosts the control software for the RaspTank2 tracked rover: Web 
    ```
 5. Start the server:
    ```bash
-   python3 web/webServer.py
+   python3 main.py
    ```
-   The script launches the Flask video backend on port 5000 and the WebSocket interface on port 8888.
+   The core launches the Flask video backend on port 5000 and the WebSocket/WebRTC interface on port 8888.
 6. Browse to `http://<pi-ip>:5000/` for the direct Flask UI or use the SPA at `http://<pi-ip>:5000/index.html`. The WebSocket controller will connect automatically.
 
 ## Environment Variables
@@ -115,9 +117,9 @@ This repository hosts the control software for the RaspTank2 tracked rover: Web 
 Provide these through `.env`, `docker-compose.yml`, or the shell environment prior to launching the server.
 
 ## Camera Setup
-- Default backend: `picamera2` (libcamera stack) via `web/camera_opencv.py`, streaming MJPEG frames through the Flask server. Install `python3-picamera2` on Raspberry Pi OS or the PyPI `picamera2` wheel alongside the `libcamera` firmware packages.
+- Default backend: `picamera2` (libcamera stack) via `modules/camera.py`, streaming MJPEG frames through the Flask server. Install `python3-picamera2` on Raspberry Pi OS or the PyPI `picamera2` wheel alongside the `libcamera` firmware packages.
 - Supported sensors: IMX219, IMX477, and other CSI modules auto-detect when `CAMERA_BACKEND=auto` (default) or when explicitly set to `picamera2`. Reseat the ribbon cable and enable the Camera interface in `raspi-config` if detection fails.
-- USB cameras: set `CAMERA_BACKEND=opencv` to open `/dev/video*` through OpenCV `VideoCapture`. Adjust resolution and FPS in `web/camera_opencv.py` when necessary.
+- USB cameras: set `CAMERA_BACKEND=opencv` to open `/dev/video*` through OpenCV `VideoCapture`. Adjust resolution and FPS in `modules/camera.py` when necessary.
 - Headless development: set `CAMERA_BACKEND=mock` to return placeholder frames without physical hardware.
 - Performance tips: allocate at least 128 MB of GPU memory, close unused video streams, and tune frame size in `camera_opencv.py` for smoother WebSocket control.
 
@@ -166,11 +168,11 @@ Provide these through `.env`, `docker-compose.yml`, or the shell environment pri
 
 ## Usage
 - **Docker**: `docker compose logs -f rasptank2` to watch events, `docker compose stop` to halt, `docker compose down` to tear down the stack.
-- **Native**: Run `python3 web/webServer.py` inside a terminal or configure `systemd` to launch at boot. Stop with `Ctrl+C`. Optionally enable `pigpiod` via `sudo systemctl enable --now pigpiod`.
-- The UI exposes calibration modals (battery, shoulder). After changing battery calibration, the values persist in `web/servo_calibration.json`.
+- **Native**: Run `python3 main.py` inside a terminal or configure `systemd`/`cron`/`rc.local` to launch at boot. Stop with `Ctrl+C`. Optionally enable `pigpiod` via `sudo systemctl enable --now pigpiod`.
+- The UI exposes calibration modals (battery, shoulder). After changing shoulder calibration, values persist in `modules/servo_calibration.json`.
 - WebSocket API clients must authenticate with the default `admin:123456` string; update the logic in `web/webServer.py` if you require custom credentials.
 
 ## Next Steps
-- Add your own automation routines by extending `web/functions.py`.
-- Tweak servo limits in `web/webServer.py` and `web/RPIservo.py` to match your mechanical setup.
+- Add your own automation routines by extending `modules/automation.py`.
+- Tweak servo limits in `web/webServer.py` (software guard rails) and `utils/rpi_servo.py` (hardware defaults) to match your mechanical setup.
 - Use `make sync` or your preferred deployment tooling to push updates to the robot.
