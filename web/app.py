@@ -77,13 +77,16 @@ def calibration_api():
         return jsonify({"error": str(exc)}), 500
 
     status = battery_monitor.sample_status()
+    calibration_payload = {
+        "scale": result.get("scale"),
+        "factor": result.get("factor"),
+        "offset": result.get("offset"),
+        "min_voltage": result.get("min_voltage"),
+        "max_voltage": result.get("max_voltage"),
+    }
     response = {
         "success": True,
-        "calibration": {
-            "scale": result.get("scale"),
-            "factor": result.get("factor"),
-            "offset": result.get("offset"),
-        },
+        "calibration": calibration_payload,
         "actual_voltage": result.get("actual_voltage"),
         "raw_sample": result.get("raw_voltage"),
         "voltage": round(status.get("voltage", 0.0) or 0.0, 3),

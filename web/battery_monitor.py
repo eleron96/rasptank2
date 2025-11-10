@@ -34,7 +34,7 @@ except ImportError:
 
 ADS7830_ADDRESS = 0x48
 
-_MIN_VOLT = float(os.getenv("BATTERY_VOLT_MIN", "6.0"))
+_MIN_VOLT = float(os.getenv("BATTERY_VOLT_MIN", "6.8"))
 _MAX_VOLT = float(os.getenv("BATTERY_VOLT_MAX", "8.4"))
 _CHANNEL = int(os.getenv("BATTERY_ADC_CHANNEL", "0"))
 
@@ -48,7 +48,13 @@ _VOLT_SCALE = float(os.getenv("BATTERY_VOLT_SCALE", str(_MAX_VOLT)))
 _CAL_FACTOR = float(os.getenv("BATTERY_CAL_FACTOR", "1.0"))
 _CAL_OFFSET = float(os.getenv("BATTERY_CAL_OFFSET", "0.0"))
 
-_DEFAULT_CAL = {"scale": _VOLT_SCALE, "factor": _CAL_FACTOR, "offset": _CAL_OFFSET}
+_DEFAULT_CAL = {
+    "scale": _VOLT_SCALE,
+    "factor": _CAL_FACTOR,
+    "offset": _CAL_OFFSET,
+    "min_voltage": _MIN_VOLT,
+    "max_voltage": _MAX_VOLT,
+}
 _CAL_LOCK = threading.Lock()
 # Track live monitor instances so calibration changes propagate immediately.
 _ACTIVE_MONITORS = weakref.WeakSet()
@@ -69,7 +75,7 @@ def _save_calibration(data: dict) -> None:
 
 
 def _load_calibration() -> None:
-    global _VOLT_SCALE, _CAL_FACTOR, _CAL_OFFSET
+    global _VOLT_SCALE, _CAL_FACTOR, _CAL_OFFSET, _MIN_VOLT, _MAX_VOLT
     if not _CAL_FILE.is_file():
         _save_calibration(_DEFAULT_CAL)
         return
@@ -81,6 +87,10 @@ def _load_calibration() -> None:
             _CAL_FACTOR = float(data["factor"])
         if "offset" in data:
             _CAL_OFFSET = float(data["offset"])
+        if "min_voltage" in data:
+            _MIN_VOLT = float(data["min_voltage"])
+        if "max_voltage" in data:
+            _MAX_VOLT = float(data["max_voltage"])
     except Exception as exc:
         logger.error({"evt": "battery_calibration_load_error", "error": str(exc)})
 
@@ -93,12 +103,15 @@ def get_calibration() -> dict:
         "scale": _VOLT_SCALE,
         "factor": _CAL_FACTOR,
         "offset": _CAL_OFFSET,
+        "min_voltage": _MIN_VOLT,
+        "max_voltage": _MAX_VOLT,
     }
 
 
 def _apply_calibration_to_all(scale: float, factor: float, offset: float) -> dict:
-    global _VOLT_SCALE, _CAL_FACTOR, _CAL_OFFSET
+    global _VOLT_SCALE, _CAL_FACTOR, _CAL_OFFSET, _MAX_VOLT
     _VOLT_SCALE = float(scale)
+    _MAX_VOLT = float(scale)
     _CAL_FACTOR = float(factor)
     _CAL_OFFSET = float(offset)
     data = get_calibration()

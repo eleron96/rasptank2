@@ -57,6 +57,7 @@
   };
 
   const BATTERY_MIN_VOLTAGE = 6.8;
+  const BATTERY_MAX_VOLTAGE = 8.4;
 
   const state = {
     ws: null,
@@ -69,7 +70,7 @@
       battery: null,
       cpu: null
     },
-    batteryMeta: { scale: 8.4 },
+    batteryMeta: { scale: BATTERY_MAX_VOLTAGE, min_voltage: BATTERY_MIN_VOLTAGE, max_voltage: BATTERY_MAX_VOLTAGE },
     speed: parseInt(elements.speedSlider?.value || '100', 10),
     speedDebounce: null,
     connectionQualityClass: 'text-white/70',
@@ -88,6 +89,7 @@
       ema: null,
       last: null
     },
+    shoulderCalibration: null,
     systemMode: 'ACTIVE',
     cameraHighQuality: false,
     cameraMeta: null,
@@ -146,7 +148,11 @@
     if (!Number.isFinite(voltage)) {
       return null;
     }
-    const maxVoltage = Number(state.batteryMeta?.scale) || 8.4;
+    const maxVoltage = Number(
+      state.batteryMeta?.max_voltage ??
+      state.batteryMeta?.scale ??
+      BATTERY_MAX_VOLTAGE
+    );
     const minVoltage = Number(state.batteryMeta?.min_voltage ?? BATTERY_MIN_VOLTAGE);
     const span = maxVoltage - minVoltage;
     if (span <= 0) {
@@ -238,17 +244,30 @@
     fetch('/api/calibration', { credentials: 'same-origin' })
       .then((res) => res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`)))
       .then((data) => {
-        if (data && typeof data.calibration === 'object') {
-          state.batteryMeta = data.calibration;
-        } else if (data) {
-          state.batteryMeta = data;
+        const incoming = (data && typeof data.calibration === 'object')
+          ? data.calibration
+          : (typeof data === 'object' && data ? data : null);
+        if (incoming) {
+          state.batteryMeta = {
+            ...state.batteryMeta,
+            ...incoming
+          };
         }
-      if (elements.calibrationVoltage && state.batteryMeta && typeof state.batteryMeta.scale === 'number') {
-        elements.calibrationVoltage.placeholder = state.batteryMeta.scale.toFixed(2);
-      }
+        const displayScale = Number(
+          state.batteryMeta?.scale ??
+          state.batteryMeta?.max_voltage ??
+          BATTERY_MAX_VOLTAGE
+        );
+        if (elements.calibrationVoltage && Number.isFinite(displayScale)) {
+          elements.calibrationVoltage.placeholder = displayScale.toFixed(2);
+        }
       })
       .catch(() => {
-        state.batteryMeta = state.batteryMeta || {};
+        state.batteryMeta = state.batteryMeta || {
+          scale: BATTERY_MAX_VOLTAGE,
+          max_voltage: BATTERY_MAX_VOLTAGE,
+          min_voltage: BATTERY_MIN_VOLTAGE
+        };
       });
   }
 
@@ -582,12 +601,11 @@
           throw new Error(`Shoulder HTTP ${shoulderRes.status}`);
         }
         const shoulderData = await shoulderRes.json();
-        const calibration = shoulderData?.calibration || shoulderData;
-        if (calibration) {
-          state.batteryMeta = state.batteryMeta || {};
-          Object.assign(state.batteryMeta, calibration);
-          elements.calibrationBase.value = Number(calibration.base_angle || 0).toFixed(0);
-          elements.calibrationRaise.value = Number(calibration.raise_angle || 180).toFixed(0);
+        const shoulderCalibration = shoulderData?.calibration || shoulderData;
+        if (shoulderCalibration) {
+          state.shoulderCalibration = { ...shoulderCalibration };
+          elements.calibrationBase.value = Number(shoulderCalibration.base_angle || 0).toFixed(0);
+          elements.calibrationRaise.value = Number(shoulderCalibration.raise_angle || 180).toFixed(0);
         }
         if (batteryRes.ok) {
           const batteryData = await batteryRes.json();
@@ -595,7 +613,10 @@
             elements.calibrationVoltage.placeholder = batteryData.voltage.toFixed(2);
           }
           if (batteryData && typeof batteryData.calibration === 'object') {
-            state.batteryMeta = batteryData.calibration;
+            state.batteryMeta = {
+              ...state.batteryMeta,
+              ...batteryData.calibration
+            };
           }
         }
         if (elements.calibrationVoltage) {
@@ -642,10 +663,18 @@
         if (elements.calibrationVoltage) {
           elements.calibrationVoltage.value = '';
           if (data && typeof data.calibration === 'object') {
-            state.batteryMeta = data.calibration;
+            state.batteryMeta = {
+              ...state.batteryMeta,
+              ...data.calibration
+            };
           }
-          if (state.batteryMeta && typeof state.batteryMeta.scale === 'number') {
-            elements.calibrationVoltage.placeholder = Number(state.batteryMeta.scale).toFixed(2);
+          const displayScale = Number(
+            state.batteryMeta?.scale ??
+            state.batteryMeta?.max_voltage ??
+            BATTERY_MAX_VOLTAGE
+          );
+          if (Number.isFinite(displayScale)) {
+            elements.calibrationVoltage.placeholder = displayScale.toFixed(2);
           }
         }
         sendCommand('get_info');

@@ -662,7 +662,6 @@ def _set_system_mode(mode: str, reason: Optional[str] = None, auto: bool = False
         move.motorStop()
         fuc.pause()
         switch.set_all_switch_off()
-        _set_headlight_state(False, reason="mode_" + normalized.lower())
         _ws2812_turn_off()
         _set_distance_monitor_enabled(False, remember=False)
     elif normalized == "ECO":
@@ -672,7 +671,6 @@ def _set_system_mode(mode: str, reason: Optional[str] = None, auto: bool = False
         move.motorStop()
         fuc.pause()
         switch.set_all_switch_off()
-        _set_headlight_state(False, reason="mode_" + normalized.lower())
         _ws2812_turn_off()
         _sync_distance_monitor_to_user_pref()
     else:
