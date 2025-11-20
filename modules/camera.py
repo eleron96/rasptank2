@@ -630,7 +630,14 @@ class Camera(BaseCamera):
             generators.append(("opencv", stream_from_opencv()))
 
         if not generators:
-            raise RuntimeError("No usable camera backend found (Picamera2/OpenCV).")
+            print("\033[33mCamera module not connected. Starting without video stream.\033[0m")
+
+            def idle_generator():
+                while True:
+                    time.sleep(1.0)
+                    yield None
+
+            generators.append(("idle", idle_generator()))
 
         active_name, active_gen = generators[0]
 
@@ -651,6 +658,7 @@ class Camera(BaseCamera):
             if img is None:
                 if ImgIsNone == 0:
                     print("--------------------")
+                    print("\033[33mwarning: Camera module not connected or returning no frames.\033[0m")
                     print("\033[31merror: Unable to read camera data.\033[0m")
                     print("\033[33mIt may be that the Legacy camera is not turned on or the camera is not connected correctly.\033[0m")
                     print("Open the Legacy camera: Enter in Raspberry Pi\033[34m'sudo raspi-config'\033[0m -->Select\033[34m'3 Interface Options'\033[0m -->\033[34m'I1 Legacy Camera'\033[0m.")

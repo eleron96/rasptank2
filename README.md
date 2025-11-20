@@ -100,6 +100,7 @@ This repository hosts the control software for the RaspTank2 tracked rover: Web 
 | `PWM_LED_FREQ` | `50` | PWM frequency for the LED helper. |
 | `SERVO_RELAX` | `1` | Release torque automatically when servos idle (`0` keeps holding torque). |
 | `ARM_SERVO_SPEED` | `10` | Default shoulder servo travel speed (1-10). |
+| `SERVO_STEP_<JOINT>` | `1` | Initial per-servo incremental steps (`SHOULDER`, `WRIST`, `ROTATE`, `GRIPPER`, `CAMERA`). Adjust live from the Arm & Gripper gear menu; overrides persist in `modules/servo_steps.json`. |
 | `CAMERA_BACKEND` | `auto` | `picamera2`, `opencv`, or `mock` selection. |
 | `BATTERY_VOLT_MIN` | `6.0` | Voltage mapped to 0% for the battery gauge. |
 | `BATTERY_VOLT_MAX` | `8.4` | Voltage mapped to 100% (2S Li-ion). |
@@ -115,6 +116,15 @@ This repository hosts the control software for the RaspTank2 tracked rover: Web 
 | `SHOULDER_LVC_ALPHA` | `0.2` | Smoothing factor for voltage EMA. |
 
 Provide these through `.env`, `docker-compose.yml`, or the shell environment prior to launching the server.
+
+### Arm & Gripper Step Tuning
+- Open the Arm & Gripper card’s gear icon to access sliders for the shoulder, wrist, rotate, and gripper servos. Each slider controls how far a single command moves that joint (1 = smallest increment, 10 = fastest).
+- Changes are sent to `/api/servo/steps`, applied immediately to the control loop, and stored in `modules/servo_steps.json`, so they survive Pi reboots.
+- Environment variables `SERVO_STEP_<JOINT>` still seed the initial defaults (used the first time `servo_steps.json` is generated). Delete the file if you want to rebuild it from new env defaults.
+
+### Battery Calibration
+- Use the gear icon inside the Battery card to enter the multimeter-measured voltage. Press **Calibrate** to call `/api/calibration` and update the ADS7830 scale/offset values.
+- The new calibration persists (updates `modules/battery_calibration.json`) and immediately refreshes the UI/REST responses, so reboots retain the adjustment.
 
 ## Camera Setup
 - Default backend: `picamera2` (libcamera stack) via `modules/camera.py`, streaming MJPEG frames through the Flask server. Install `python3-picamera2` on Raspberry Pi OS or the PyPI `picamera2` wheel alongside the `libcamera` firmware packages.

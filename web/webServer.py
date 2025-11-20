@@ -20,6 +20,7 @@ from modules import battery_monitor
 from modules import camera as camera_opencv
 from modules import imu_sensor
 from modules import servo_calibration
+from modules import servo_steps
 from modules import ultra
 from modules import movement as move
 from modules.lighting import LightingController
@@ -46,7 +47,6 @@ rad = 0.5
 turnWiggle = 60
 
 SHOULDER_SERVO_CHANNEL = 0
-SHOULDER_DRIVE_SPEED = 2
 LVC_DISABLED = os.getenv("SHOULDER_LVC_DISABLE", "1").strip() in ("1", "true", "on")
 LVC_LOWER_V = float(os.getenv("SHOULDER_LVC_LOWER", "6.0"))
 LVC_UPPER_V = float(os.getenv("SHOULDER_LVC_UPPER", "6.2"))
@@ -127,6 +127,15 @@ G_sc.start()
 G_sc.set_direction(3, -1)
 
 lighting = LightingController()
+
+
+def _servo_drive_speed(name: str) -> int:
+    """Fetch the latest configured step for a servo channel."""
+    try:
+        return servo_steps.get_step(name)
+    except Exception:
+        return 1
+
 
 def _clamp_speed(value, minimum=1, maximum=10):
     return max(minimum, min(maximum, value))
@@ -751,7 +760,7 @@ def robotCtrl(command_input, response):
         _shoulder_state["last_cmd"] = "armUp"
         _shoulder_state["last_cmd_ts"] = time.time()
         _log_shoulder_action('armUp')
-        H1_sc.singleServo(SHOULDER_SERVO_CHANNEL, -1, SHOULDER_DRIVE_SPEED)
+        H1_sc.singleServo(SHOULDER_SERVO_CHANNEL, -1, _servo_drive_speed("shoulder"))
         _schedule_shoulder_timeout()
         _log_shoulder_state("shoulder_cmd", direction="up")
     elif 'armDown' == command_input:
@@ -764,7 +773,7 @@ def robotCtrl(command_input, response):
         _shoulder_state["last_cmd"] = "armDown"
         _shoulder_state["last_cmd_ts"] = time.time()
         _log_shoulder_action('armDown')
-        H1_sc.singleServo(SHOULDER_SERVO_CHANNEL, 1, SHOULDER_DRIVE_SPEED)
+        H1_sc.singleServo(SHOULDER_SERVO_CHANNEL, 1, _servo_drive_speed("shoulder"))
         _schedule_shoulder_timeout()
         _log_shoulder_state("shoulder_cmd", direction="down")
     elif 'armStop' in command_input:
@@ -772,31 +781,31 @@ def robotCtrl(command_input, response):
 
     elif 'handUp' == command_input: # servo B
         log_servo_action('handUp')
-        H2_sc.singleServo(1, -1, 2)
+        H2_sc.singleServo(1, -1, _servo_drive_speed("wrist"))
     elif 'handDown' == command_input:
         log_servo_action('handDown')
-        H2_sc.singleServo(1,1, 2)
+        H2_sc.singleServo(1, 1, _servo_drive_speed("wrist"))
     elif 'handStop' in command_input:
         log_servo_action('handStop')
         H2_sc.stopWiggle()
 
     elif 'lookleft' == command_input: # servo C
         log_servo_action('lookleft')
-        P_sc.singleServo(2, 1, 2)
+        P_sc.singleServo(2, 1, _servo_drive_speed("rotate"))
     elif 'lookright' == command_input:
         log_servo_action('lookright')
-        P_sc.singleServo(2,-1, 2)
+        P_sc.singleServo(2, -1, _servo_drive_speed("rotate"))
     elif 'LRstop' in command_input:
         log_servo_action('LRstop')
         P_sc.stopWiggle()
 
     elif 'grab' == command_input: # servo D
         log_servo_action('grab')
-        G_sc.singleServo(3, 1, 2)
+        G_sc.singleServo(3, 1, _servo_drive_speed("gripper"))
         buzzer.double()
     elif 'loose' == command_input:
         log_servo_action('loose')
-        G_sc.singleServo(3,-1, 2)
+        G_sc.singleServo(3, -1, _servo_drive_speed("gripper"))
         buzzer.double()
     elif 'GLstop' in command_input:
         log_servo_action('GLstop')
@@ -804,10 +813,10 @@ def robotCtrl(command_input, response):
 
     elif 'up' == command_input: # camera
         log_servo_action('up')
-        T_sc.singleServo(4, -1, 1)
+        T_sc.singleServo(4, -1, _servo_drive_speed("camera"))
     elif 'down' == command_input:
         log_servo_action('down')
-        T_sc.singleServo(4,1, 1)
+        T_sc.singleServo(4, 1, _servo_drive_speed("camera"))
     elif 'UDstop' in command_input:
         log_servo_action('UDstop')
         T_sc.stopWiggle()

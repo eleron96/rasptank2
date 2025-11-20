@@ -27,6 +27,16 @@ body {
   background: radial-gradient(circle at top, rgba(14, 116, 144, 0.25), transparent 55%) no-repeat,
     radial-gradient(circle at bottom, rgba(76, 29, 149, 0.3), transparent 60%) no-repeat,
     var(--ui-bg);
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+textarea,
+select,
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 #app {

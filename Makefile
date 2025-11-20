@@ -1,6 +1,6 @@
 # ==== Конфиг ====
 #100.64.22.1 - этот адрес если через tailscale
-PI_HOST ?= 192.168.0.187
+PI_HOST ?= 192.168.0.188
 PI_USER ?= niko
 APP_NAME ?= rasptank2
 REMOTE_DIR ?= /home/$(PI_USER)/$(APP_NAME)

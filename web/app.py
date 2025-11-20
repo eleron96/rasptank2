@@ -3,6 +3,7 @@ from importlib import import_module
 import json
 import hashlib
 import os
+import re
 from flask import Flask, Response, send_from_directory, jsonify, request
 from flask_cors import *
 # import camera driver
@@ -12,6 +13,7 @@ import threading
 
 from modules import battery_monitor
 from modules import servo_calibration
+from modules import servo_steps
 from core.events import event_bus
 
 # Raspberry Pi camera module (requires picamera package)
@@ -132,6 +134,21 @@ def shoulder_servo_calibration():
     return jsonify({"success": True, "calibration": result})
 
 
+@app.route('/api/servo/steps', methods=['GET', 'POST'])
+def servo_step_settings():
+    if request.method == 'GET':
+        return jsonify({"steps": servo_steps.get_steps(), "limits": servo_steps.get_limits()})
+
+    payload = request.get_json(force=True) or {}
+    updates = {key: payload.get(key) for key in servo_steps.SERVO_STEP_KEYS if key in payload}
+    try:
+        result = servo_steps.update_steps(updates)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    event_bus.publish("servo_steps", {"steps": result, "limits": servo_steps.get_limits()})
+    return jsonify({"success": True, "steps": result, "limits": servo_steps.get_limits()})
+
+
 @app.route('/api/events')
 def sse_events():
     """Server-sent events stream for UI updates."""
@@ -145,6 +162,10 @@ def sse_events():
             "type": "battery_status",
             "payload": battery_monitor.sample_status(),
         })
+        queue.put({
+            "type": "servo_steps",
+            "payload": {"steps": servo_steps.get_steps(), "limits": servo_steps.get_limits()},
+        })
         try:
             while True:
                 message = queue.get()
@@ -157,34 +178,63 @@ def sse_events():
     return Response(stream(), mimetype='text/event-stream')
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
+dist_dir = os.path.join(dir_path, "dist")
+default_index = "index.html"
+mobile_index = "index.mobile.html"
+mobile_user_agent = re.compile(
+    r"(iphone|ipod|ipad|android|blackberry|windows phone|opera mini|mobile)",
+    re.IGNORECASE,
+)
+
+
+def _is_mobile_request() -> bool:
+    """Basic user-agent check to decide whether to serve the mobile-friendly page."""
+    if request.args.get("desktop") == "1":
+        return False
+    if request.args.get("mobile") == "1":
+        return True
+    ua = request.headers.get("User-Agent", "") or ""
+    return bool(mobile_user_agent.search(ua))
+
+
+def _resolve_index_file() -> str:
+    """Return the correct index file depending on device type and availability."""
+    target = default_index
+    if _is_mobile_request():
+        mobile_path = os.path.join(dist_dir, mobile_index)
+        if os.path.exists(mobile_path):
+            target = mobile_index
+    return target
 
 @app.route('/api/img/<path:filename>')
 def sendimg(filename):
-    return send_from_directory(dir_path+'/dist/img', filename)
+    return send_from_directory(os.path.join(dist_dir, 'img'), filename)
 
 @app.route('/js/<path:filename>')
 def sendjs(filename):
-    return send_from_directory(dir_path+'/dist/js', filename)
+    return send_from_directory(os.path.join(dist_dir, 'js'), filename)
 
 @app.route('/css/<path:filename>')
 def sendcss(filename):
-    return send_from_directory(dir_path+'/dist/css', filename)
+    return send_from_directory(os.path.join(dist_dir, 'css'), filename)
 
 @app.route('/api/img/icon/<path:filename>')
 def sendicon(filename):
-    return send_from_directory(dir_path+'/dist/img/icon', filename)
+    return send_from_directory(os.path.join(dist_dir, 'img', 'icon'), filename)
 
 @app.route('/fonts/<path:filename>')
 def sendfonts(filename):
-    return send_from_directory(dir_path+'/dist/fonts', filename)
+    return send_from_directory(os.path.join(dist_dir, 'fonts'), filename)
 
 @app.route('/<path:filename>')
 def sendgen(filename):
-    return send_from_directory(dir_path+'/dist', filename)
+    if filename == "index.html":
+        return send_from_directory(dist_dir, _resolve_index_file())
+    return send_from_directory(dist_dir, filename)
 
 @app.route('/')
 def index():
-    return send_from_directory(dir_path+'/dist', 'index.html')
+    return send_from_directory(dist_dir, _resolve_index_file())
 
 class webapp:
     def __init__(self):

@@ -540,7 +540,49 @@
                 </div>
               </div>
               <div class="glass-panel-light border rounded-xl p-4 space-y-4">
-                <p class="text-sm text-white/70 font-medium text-center tracking-wide uppercase">Arm &amp; Gripper</p>
+                <div class="flex items-center justify-between">
+                  <p class="text-sm text-white/70 font-medium text-center tracking-wide uppercase flex-1 text-left">Arm &amp; Gripper</p>
+                  <button id="arm-settings-button" class="size-7 grid place-items-center rounded-full border border-white/15 text-white/70 hover:border-primary hover:text-primary transition" aria-label="Arm step settings">
+                    <span class="material-symbols-outlined text-base">settings</span>
+                  </button>
+                </div>
+                <div id="arm-settings-panel" class="hidden rounded-lg border border-white/10 bg-panel-muted/40 p-3 space-y-3 text-xs text-white/70">
+                  <p class="text-[11px] text-white/50 leading-snug">Adjust how far the shoulder, wrist, rotate, and gripper servos travel per command. Values persist across reboots.</p>
+                  <div class="space-y-2">
+                    <label class="flex items-center justify-between gap-4">
+                      <span>Shoulder step</span>
+                      <div class="flex items-center gap-2 w-36">
+                        <input id="arm-step-shoulder" type="range" min="1" max="10" value="1" class="flex-1 accent-primary">
+                        <span id="arm-step-shoulder-value" class="w-6 text-right font-semibold text-white/90">1</span>
+                      </div>
+                    </label>
+                    <label class="flex items-center justify-between gap-4">
+                      <span>Wrist step</span>
+                      <div class="flex items-center gap-2 w-36">
+                        <input id="arm-step-wrist" type="range" min="1" max="10" value="1" class="flex-1 accent-primary">
+                        <span id="arm-step-wrist-value" class="w-6 text-right font-semibold text-white/90">1</span>
+                      </div>
+                    </label>
+                    <label class="flex items-center justify-between gap-4">
+                      <span>Rotate step</span>
+                      <div class="flex items-center gap-2 w-36">
+                        <input id="arm-step-rotate" type="range" min="1" max="10" value="1" class="flex-1 accent-primary">
+                        <span id="arm-step-rotate-value" class="w-6 text-right font-semibold text-white/90">1</span>
+                      </div>
+                    </label>
+                    <label class="flex items-center justify-between gap-4">
+                      <span>Gripper step</span>
+                      <div class="flex items-center gap-2 w-36">
+                        <input id="arm-step-gripper" type="range" min="1" max="10" value="1" class="flex-1 accent-primary">
+                        <span id="arm-step-gripper-value" class="w-6 text-right font-semibold text-white/90">1</span>
+                      </div>
+                    </label>
+                  </div>
+                  <div class="flex items-center justify-between gap-3 pt-1">
+                    <button id="arm-settings-save" class="px-3 py-1.5 rounded-lg bg-primary/20 text-white/90 text-xs font-semibold hover:bg-primary/30 transition">Save</button>
+                    <p id="arm-settings-status" class="text-[11px] text-white/60 text-right flex-1"></p>
+                  </div>
+                </div>
                 <div class="grid grid-cols-2 gap-2 text-xs">
                   <div class="arm-cluster" data-label="Gripper" data-command="grab" data-stop="GLstop" data-command-alt="loose"></div>
                   <div class="arm-cluster" data-label="Shoulder" data-command="armUp" data-stop="armStop" data-command-alt="armDown"></div>
@@ -563,10 +605,26 @@
             <div class="glass-panel border rounded-xl p-5 flex flex-col gap-4 shadow-lg">
               <h2 class="text-lg font-semibold">Rover Stats</h2>
               <div class="grid grid-cols-1 gap-4">
-                <div class="glass-panel-light border rounded-xl p-4">
-                  <div class="flex justify-between items-center mb-2">
-                    <p class="stat-title">Battery</p>
+                <div class="glass-panel-light border rounded-xl p-4 space-y-3">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                      <p class="stat-title">Battery</p>
+                      <button id="battery-settings-button" class="size-7 grid place-items-center rounded-full border border-white/15 text-white/70 hover:border-primary hover:text-primary transition" aria-label="Battery calibration">
+                        <span class="material-symbols-outlined text-base">settings</span>
+                      </button>
+                    </div>
                     <p class="stat-value"><span id="battery-percent">--</span>%</p>
+                  </div>
+                  <div id="battery-settings-panel" class="hidden rounded-lg border border-white/10 bg-panel-muted/40 p-3 space-y-3 text-xs text-white/70">
+                    <p class="text-[11px] text-white/50 leading-snug">Введите измеренное мультиметром напряжение батареи, чтобы скорректировать показания индикатора.</p>
+                    <label class="flex items-center justify-between gap-4">
+                      <span>Measured voltage (V)</span>
+                      <input id="battery-cal-input" type="number" min="0" step="0.01" class="h-9 w-24 rounded border border-white/15 bg-panel-accent px-2 text-sm">
+                    </label>
+                    <div class="flex items-center justify-between gap-3">
+                      <button id="battery-cal-run" class="secondary-button px-3 py-1 text-xs">Calibrate</button>
+                      <p id="battery-cal-status" class="text-[11px] text-white/60 text-right flex-1"></p>
+                    </div>
                   </div>
                   <div class="h-12">
                     <canvas id="battery-chart"></canvas>
@@ -642,10 +700,6 @@
             <div class="glass-panel border rounded-xl p-6 shadow-lg flex flex-col gap-6">
               <div class="flex items-center justify-between">
                 <h2 class="text-lg font-semibold">Settings</h2>
-                <button id="open-calibration" class="inline-flex items-center gap-2 rounded-full border border-white/15 px-4 py-1.5 text-xs uppercase tracking-wide text-white/70 hover:border-primary hover:text-primary transition">
-                  <span class="material-symbols-outlined text-sm">tune</span>
-                  Shoulder calibration
-                </button>
               </div>
 
                 <div class="grid lg:grid-cols-3 gap-5">
@@ -705,43 +759,6 @@
           </section>
         </div>
       </main>
-    </div>
-
-    <div id="calibration-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-      <div class="w-full max-w-md rounded-2xl border border-white/10 bg-panel-dark p-6 shadow-xl space-y-5">
-        <div class="flex items-center justify-between">
-          <h3 class="text-lg font-semibold">Shoulder Calibration</h3>
-          <button class="size-8 grid place-items-center rounded-full border border-white/10 hover:border-primary hover:text-primary transition" data-close>
-            <span class="material-symbols-outlined text-lg">close</span>
-          </button>
-        </div>
-        <div class="space-y-4 text-sm text-white/70">
-          <label class="flex items-center justify-between gap-4">
-            <span>Base angle (°)</span>
-            <input id="calibration-base" type="number" min="0" max="180" class="h-10 w-24 rounded border border-white/15 bg-panel-accent px-3">
-          </label>
-          <label class="flex items-center justify-between gap-4">
-            <span>Raise offset (°)</span>
-            <input id="calibration-raise" type="number" min="5" max="180" class="h-10 w-24 rounded border border-white/15 bg-panel-accent px-3">
-          </label>
-          <p class="text-xs text-white/50 leading-relaxed">
-            The base angle defines the neutral shoulder position. The raise offset controls how far the joint can lift above the base.
-          </p>
-          <div class="pt-3 border-t border-white/10 space-y-3">
-            <p class="text-xs uppercase tracking-wide text-white/60">Battery Voltage Calibration</p>
-            <label class="flex items-center justify-between gap-4">
-              <span>Measured voltage (V)</span>
-              <input id="calibration-voltage" type="number" min="0" step="0.01" class="h-10 w-28 rounded border border-white/15 bg-panel-accent px-3">
-            </label>
-            <button id="calibration-run" class="secondary-button w-full justify-center">Calibrate Voltage</button>
-          </div>
-          <div id="calibration-status" class="text-xs text-white/60 h-4"></div>
-        </div>
-        <div class="flex justify-end gap-3">
-          <button class="secondary-button" data-close>Cancel</button>
-          <button id="calibration-save" class="primary-button">Save</button>
-        </div>
-      </div>
     </div>
 
     <template id="arm-cluster-template">

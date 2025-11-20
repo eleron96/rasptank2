@@ -46,14 +46,27 @@
     distanceSettingsPanel: document.getElementById('distance-settings-panel'),
     distanceToggle: document.getElementById('distance-toggle'),
     stripButton: document.querySelector('[data-light="strip"]'),
-    calibrationModal: document.getElementById('calibration-modal'),
-    calibrationBase: document.getElementById('calibration-base'),
-    calibrationRaise: document.getElementById('calibration-raise'),
-    calibrationStatus: document.getElementById('calibration-status'),
-    calibrationSave: document.getElementById('calibration-save'),
-    calibrationVoltage: document.getElementById('calibration-voltage'),
-    calibrationRun: document.getElementById('calibration-run'),
-    openCalibration: document.getElementById('open-calibration')
+    armSettingsButton: document.getElementById('arm-settings-button'),
+    armSettingsPanel: document.getElementById('arm-settings-panel'),
+    armSettingsSave: document.getElementById('arm-settings-save'),
+    armSettingsStatus: document.getElementById('arm-settings-status'),
+    armStepInputs: {
+      shoulder: document.getElementById('arm-step-shoulder'),
+      wrist: document.getElementById('arm-step-wrist'),
+      rotate: document.getElementById('arm-step-rotate'),
+      gripper: document.getElementById('arm-step-gripper')
+    },
+    armStepValues: {
+      shoulder: document.getElementById('arm-step-shoulder-value'),
+      wrist: document.getElementById('arm-step-wrist-value'),
+      rotate: document.getElementById('arm-step-rotate-value'),
+      gripper: document.getElementById('arm-step-gripper-value')
+    },
+    batterySettingsButton: document.getElementById('battery-settings-button'),
+    batterySettingsPanel: document.getElementById('battery-settings-panel'),
+    batteryCalibrationInput: document.getElementById('battery-cal-input'),
+    batteryCalibrationRun: document.getElementById('battery-cal-run'),
+    batteryCalibrationStatus: document.getElementById('battery-cal-status')
   };
 
   const BATTERY_MIN_VOLTAGE = 6.8;
@@ -89,7 +102,6 @@
       ema: null,
       last: null
     },
-    shoulderCalibration: null,
     systemMode: 'ACTIVE',
     cameraHighQuality: false,
     cameraMeta: null,
@@ -97,6 +109,8 @@
       stripAvailable: true
     },
     distanceStatus: 'disabled',
+    armSteps: null,
+    armStepLimits: { min: 1, max: 10 },
     gradient: {
       dark: { instance: null, currentState: null },
       eco: { instance: null, currentState: null }
@@ -175,8 +189,9 @@
     setupCvflControls();
     setupFcControls();
     setupArmControls();
+    setupArmStepSettings();
+    setupBatteryCalibrationPanel();
     setupUtilities();
-    setupCalibration();
     setupWebSocket();
     setupEvents();
     setupDistanceSettings();
@@ -253,14 +268,7 @@
             ...incoming
           };
         }
-        const displayScale = Number(
-          state.batteryMeta?.scale ??
-          state.batteryMeta?.max_voltage ??
-          BATTERY_MAX_VOLTAGE
-        );
-        if (elements.calibrationVoltage && Number.isFinite(displayScale)) {
-          elements.calibrationVoltage.placeholder = displayScale.toFixed(2);
-        }
+        updateBatteryCalibrationPlaceholder();
       })
       .catch(() => {
         state.batteryMeta = state.batteryMeta || {
@@ -268,6 +276,9 @@
           max_voltage: BATTERY_MAX_VOLTAGE,
           min_voltage: BATTERY_MIN_VOLTAGE
         };
+      })
+      .finally(() => {
+        updateBatteryCalibrationPlaceholder();
       });
   }
 
@@ -511,6 +522,217 @@
     });
   }
 
+  function setupArmStepSettings () {
+    const button = elements.armSettingsButton;
+    const panel = elements.armSettingsPanel;
+    if (!button || !panel) return;
+
+    const closePanel = () => panel.classList.add('hidden');
+    const togglePanel = (event) => {
+      event?.stopPropagation();
+      panel.classList.toggle('hidden');
+    };
+
+    button.addEventListener('click', togglePanel);
+    panel.addEventListener('click', (event) => event.stopPropagation());
+    document.addEventListener('click', closePanel);
+
+    const inputs = elements.armStepInputs || {};
+    Object.entries(inputs).forEach(([key, input]) => {
+      if (!input) return;
+      input.addEventListener('input', () => updateArmStepValueLabel(key, input.value));
+    });
+
+    elements.armSettingsSave?.addEventListener('click', saveArmStepSettings);
+    loadArmStepSettings();
+  }
+
+  async function loadArmStepSettings () {
+    if (!elements.armSettingsPanel) return;
+    try {
+      const response = await fetch('/api/servo/steps', { credentials: 'same-origin' });
+      const data = await response.json();
+      if (!response.ok || data?.error) {
+        throw new Error(data?.error || `HTTP ${response.status}`);
+      }
+      applyServoStepSnapshot(data);
+      setArmSettingsStatus('', false);
+    } catch (error) {
+      console.warn('Failed to load servo steps', error);
+      setArmSettingsStatus(error.message || 'Failed to load', true);
+    }
+  }
+
+  async function saveArmStepSettings (event) {
+    event?.preventDefault();
+    if (!elements.armSettingsSave) return;
+    const inputs = elements.armStepInputs || {};
+    const payload = {};
+    Object.entries(inputs).forEach(([key, input]) => {
+      if (!input) return;
+      const parsed = parseInt(input.value, 10);
+      if (Number.isFinite(parsed)) {
+        payload[key] = parsed;
+      }
+    });
+    elements.armSettingsSave.disabled = true;
+    setArmSettingsStatus('Saving...', false);
+    try {
+      const response = await fetch('/api/servo/steps', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json();
+      if (!response.ok || data?.error) {
+        throw new Error(data?.error || `HTTP ${response.status}`);
+      }
+      applyServoStepSnapshot(data);
+      setArmSettingsStatus('Saved', false);
+      window.setTimeout(() => setArmSettingsStatus('', false), 1500);
+    } catch (error) {
+      setArmSettingsStatus(error.message || 'Failed to save', true);
+    } finally {
+      elements.armSettingsSave.disabled = false;
+    }
+  }
+
+  function applyServoStepSnapshot (payload) {
+    if (!payload) return;
+    const limits = payload.limits || payload.bounds;
+    if (limits) {
+      const min = Number(limits.min);
+      const max = Number(limits.max);
+      if (Number.isFinite(min) && Number.isFinite(max)) {
+        state.armStepLimits = { min, max };
+      }
+    }
+    const steps = payload.steps || payload;
+    if (steps) {
+      state.armSteps = { ...(state.armSteps || {}), ...steps };
+      syncArmStepInputs();
+    }
+  }
+
+  function syncArmStepInputs () {
+    if (!state.armSteps) return;
+    const inputs = elements.armStepInputs || {};
+    const limits = state.armStepLimits || { min: 1, max: 10 };
+    Object.entries(inputs).forEach(([key, input]) => {
+      if (!input || state.armSteps[key] == null) return;
+      input.min = limits.min;
+      input.max = limits.max;
+      input.value = state.armSteps[key];
+      updateArmStepValueLabel(key, state.armSteps[key]);
+    });
+  }
+
+  function updateArmStepValueLabel (key, value) {
+    const labelMap = elements.armStepValues || {};
+    const target = labelMap[key];
+    if (!target) return;
+    const numeric = Number(value);
+    target.textContent = Number.isFinite(numeric) ? numeric : '--';
+  }
+
+  function setArmSettingsStatus (message, isError) {
+    const target = elements.armSettingsStatus;
+    if (!target) return;
+    target.textContent = message || '';
+    target.classList.remove('text-red-400', 'text-white/60');
+    if (!message) {
+      target.classList.add('text-white/60');
+      return;
+    }
+    target.classList.add(isError ? 'text-red-400' : 'text-white/60');
+  }
+
+  function setupBatteryCalibrationPanel () {
+    const button = elements.batterySettingsButton;
+    const panel = elements.batterySettingsPanel;
+    if (!button || !panel) return;
+
+    const closePanel = () => panel.classList.add('hidden');
+    const togglePanel = (event) => {
+      event?.stopPropagation();
+      panel.classList.toggle('hidden');
+    };
+
+    button.addEventListener('click', togglePanel);
+    panel.addEventListener('click', (event) => event.stopPropagation());
+    document.addEventListener('click', closePanel);
+
+    elements.batteryCalibrationRun?.addEventListener('click', runBatteryCalibration);
+  }
+
+  async function runBatteryCalibration (event) {
+    event?.preventDefault();
+    const button = elements.batteryCalibrationRun;
+    const input = elements.batteryCalibrationInput;
+    if (!button || !input) return;
+
+    const value = parseFloat(input.value || '0');
+    if (!Number.isFinite(value) || value <= 0) {
+      setBatteryCalStatus('Enter a valid measured voltage.', true);
+      return;
+    }
+
+    setBatteryCalStatus('Calibrating...', false);
+    button.disabled = true;
+    try {
+      const response = await fetch('/api/calibration', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ voltage: value })
+      });
+      const data = await response.json();
+      if (!response.ok || data?.error) {
+        throw new Error(data?.error || `HTTP ${response.status}`);
+      }
+      setBatteryCalStatus('Voltage calibration saved.', false);
+      input.value = '';
+      if (data && typeof data.calibration === 'object') {
+        state.batteryMeta = {
+          ...state.batteryMeta,
+          ...data.calibration
+        };
+      }
+      updateBatteryCalibrationPlaceholder();
+      sendCommand('get_info');
+    } catch (error) {
+      setBatteryCalStatus(error.message || 'Calibration failed.', true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  function setBatteryCalStatus (message, isError) {
+    const target = elements.batteryCalibrationStatus;
+    if (!target) return;
+    target.textContent = message || '';
+    target.classList.remove('text-red-400', 'text-white/60');
+    if (!message) {
+      target.classList.add('text-white/60');
+      return;
+    }
+    target.classList.add(isError ? 'text-red-400' : 'text-white/60');
+  }
+
+  function updateBatteryCalibrationPlaceholder () {
+    const input = elements.batteryCalibrationInput;
+    if (!input) return;
+    const displayScale = Number(
+      state.batteryMeta?.scale ??
+      state.batteryMeta?.max_voltage ??
+      BATTERY_MAX_VOLTAGE
+    );
+    if (Number.isFinite(displayScale)) {
+      input.placeholder = displayScale.toFixed(2);
+    }
+  }
+
   function attachArmButton (button, command, stop) {
     let active = false;
     let fallbackTimer = null;
@@ -581,146 +803,6 @@
     });
   }
 
-  function setupCalibration () {
-    if (!elements.openCalibration || !elements.calibrationModal) return;
-
-    const closeModal = () => {
-      elements.calibrationModal.classList.add('hidden');
-    };
-
-    elements.openCalibration.addEventListener('click', async () => {
-      elements.calibrationStatus.textContent = 'Loading...';
-      elements.calibrationStatus.classList.remove('text-red-400', 'text-green-400');
-      elements.calibrationModal.classList.remove('hidden');
-      try {
-        const [shoulderRes, batteryRes] = await Promise.all([
-          fetch('/api/servo/shoulder', { credentials: 'same-origin' }),
-          fetch('/api/calibration', { credentials: 'same-origin' })
-        ]);
-        if (!shoulderRes.ok) {
-          throw new Error(`Shoulder HTTP ${shoulderRes.status}`);
-        }
-        const shoulderData = await shoulderRes.json();
-        const shoulderCalibration = shoulderData?.calibration || shoulderData;
-        if (shoulderCalibration) {
-          state.shoulderCalibration = { ...shoulderCalibration };
-          elements.calibrationBase.value = Number(shoulderCalibration.base_angle || 0).toFixed(0);
-          elements.calibrationRaise.value = Number(shoulderCalibration.raise_angle || 180).toFixed(0);
-        }
-        if (batteryRes.ok) {
-          const batteryData = await batteryRes.json();
-          if (batteryData && typeof batteryData.voltage === 'number') {
-            elements.calibrationVoltage.placeholder = batteryData.voltage.toFixed(2);
-          }
-          if (batteryData && typeof batteryData.calibration === 'object') {
-            state.batteryMeta = {
-              ...state.batteryMeta,
-              ...batteryData.calibration
-            };
-          }
-        }
-        if (elements.calibrationVoltage) {
-          elements.calibrationVoltage.value = '';
-        }
-        elements.calibrationStatus.textContent = '';
-      } catch (error) {
-        elements.calibrationStatus.textContent = error.message;
-        elements.calibrationStatus.classList.add('text-red-400');
-      }
-    });
-
-    elements.calibrationModal.querySelectorAll('[data-close]').forEach((btn) => {
-      btn.addEventListener('click', closeModal);
-    });
-
-    elements.calibrationRun?.addEventListener('click', async () => {
-      const value = parseFloat(elements.calibrationVoltage?.value || '0');
-      if (!Number.isFinite(value) || value <= 0) {
-        elements.calibrationStatus.textContent = 'Enter a valid measured voltage.';
-        elements.calibrationStatus.classList.add('text-red-400');
-        elements.calibrationStatus.classList.remove('text-green-400');
-        return;
-      }
-      elements.calibrationStatus.textContent = 'Calibrating...';
-      elements.calibrationStatus.classList.remove('text-red-400', 'text-green-400');
-      try {
-        const response = await fetch('/api/calibration', {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ voltage: value })
-        });
-        const data = await response.json();
-        if (!response.ok || data?.error) {
-          throw new Error(data?.error || `HTTP ${response.status}`);
-        }
-        elements.calibrationStatus.textContent = 'Voltage calibration saved.';
-        elements.calibrationStatus.classList.add('text-green-400');
-        elements.calibrationStatus.classList.remove('text-red-400');
-        if (elements.batteryVoltage && typeof data.voltage === 'number') {
-          elements.batteryVoltage.textContent = Number(data.voltage).toFixed(2);
-        }
-        if (elements.calibrationVoltage) {
-          elements.calibrationVoltage.value = '';
-          if (data && typeof data.calibration === 'object') {
-            state.batteryMeta = {
-              ...state.batteryMeta,
-              ...data.calibration
-            };
-          }
-          const displayScale = Number(
-            state.batteryMeta?.scale ??
-            state.batteryMeta?.max_voltage ??
-            BATTERY_MAX_VOLTAGE
-          );
-          if (Number.isFinite(displayScale)) {
-            elements.calibrationVoltage.placeholder = displayScale.toFixed(2);
-          }
-        }
-        sendCommand('get_info');
-      } catch (error) {
-        elements.calibrationStatus.textContent = error.message;
-        elements.calibrationStatus.classList.add('text-red-400');
-        elements.calibrationStatus.classList.remove('text-green-400');
-      }
-    });
-
-    elements.calibrationSave?.addEventListener('click', async () => {
-      const base = Number(elements.calibrationBase.value);
-      const raise = Number(elements.calibrationRaise.value);
-      if (!Number.isFinite(base) || base < 0 || base > 180) {
-        elements.calibrationStatus.textContent = 'Base angle must be between 0 and 180.';
-        elements.calibrationStatus.classList.add('text-red-400');
-        return;
-      }
-      if (!Number.isFinite(raise) || raise < 5 || raise > 180) {
-        elements.calibrationStatus.textContent = 'Raise angle must be between 5 and 180.';
-        elements.calibrationStatus.classList.add('text-red-400');
-        return;
-      }
-      elements.calibrationStatus.textContent = 'Saving...';
-      elements.calibrationStatus.classList.remove('text-red-400', 'text-green-400');
-      try {
-        const response = await fetch('/api/servo/shoulder', {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ base_angle: base, raise_angle: raise })
-        });
-        const data = await response.json();
-        if (!response.ok || data?.error) {
-          throw new Error(data?.error || `HTTP ${response.status}`);
-        }
-        elements.calibrationStatus.textContent = 'Calibration saved.';
-        elements.calibrationStatus.classList.add('text-green-400');
-        window.setTimeout(closeModal, 1200);
-      } catch (error) {
-        elements.calibrationStatus.textContent = error.message;
-        elements.calibrationStatus.classList.add('text-red-400');
-      }
-    });
-  }
-
   function setupWebSocket () {
     if (state.connectFn) {
       state.connectFn();
@@ -776,6 +858,14 @@
           updateDistanceOverlay(payload.cm, payload.display, payload.status);
         } catch (error) {
           console.warn('distance_update parse failed', error);
+        }
+      });
+      source.addEventListener('servo_steps', (event) => {
+        try {
+          const payload = JSON.parse(event.data || '{}');
+          applyServoStepSnapshot(payload);
+        } catch (error) {
+          console.warn('servo_steps parse failed', error);
         }
       });
       source.addEventListener('error', () => {

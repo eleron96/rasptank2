@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>RC Rover - Mobile</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon.ico" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon.ico" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#f3f4f6" />
+
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap"
+    />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined"
+    />
+
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              primary: '#1173d4',
+            },
+            fontFamily: {
+              display: ['Space Grotesk', 'system-ui', 'sans-serif'],
+            },
+            boxShadow: {
+              soft: '0 12px 30px rgba(15, 23, 42, 0.06)',
+            },
+          },
+        },
+      };
+    </script>
+
+    <style>
+      * {
+        -webkit-user-select: none;
+        user-select: none;
+      }
+
+      body {
+        font-family: 'Space Grotesk', system-ui, -apple-system, BlinkMacSystemFont,
+          'Segoe UI', sans-serif;
+      }
+
+      /* Joystick styles */
+      .joystick-base {
+        touch-action: none;
+      }
+
+      .joystick-knob {
+        touch-action: none;
+        transition: transform 80ms ease-out;
+      }
+
+      .material-symbols-outlined {
+        font-variation-settings:
+          'FILL' 0,
+          'Wght' 400,
+          'GRAD' 0,
+          'opsz' 24;
+      }
+
+      .sensor-chip {
+        border-radius: 9999px;
+        border: 1px solid rgba(148, 163, 184, 0.4);
+        background: rgba(255, 255, 255, 0.9);
+        box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
+        color: #475569;
+      }
+
+      .sensor-chip-label {
+        letter-spacing: 0.08em;
+      }
+
+      .vertical-range {
+        -webkit-appearance: slider-vertical;
+        appearance: slider-vertical;
+        writing-mode: bt-lr;
+        width: 26px;
+        height: 96px;
+      }
+
+      .scrollbar-thin::-webkit-scrollbar {
+        height: 6px;
+        width: 6px;
+      }
+      .scrollbar-thin::-webkit-scrollbar-thumb {
+        background-color: rgba(148, 163, 184, 0.35);
+        border-radius: 9999px;
+      }
+      .scrollbar-thin::-webkit-scrollbar-track {
+        background-color: transparent;
+      }
+    </style>
+  </head>
+
+  <body class="bg-slate-100 text-slate-900 min-h-screen">
+    <div class="flex min-h-screen flex-col">
+      <!-- Header -->
+      <header
+        class="flex items-center justify-between gap-3 border-b border-slate-200 bg-white/90 px-4 py-3 backdrop-blur"
+      >
+        <div class="flex items-center gap-3">
+          <div
+            class="grid h-9 w-9 place-items-center rounded-2xl bg-primary/10 text-primary"
+          >
+            <span class="material-symbols-outlined text-2xl">
+              precision_manufacturing
+            </span>
+          </div>
+          <div class="leading-tight">
+            <h1 class="text-base font-semibold tracking-tight">RC Rover</h1>
+            <p class="text-xs text-slate-500">Mobile control station</p>
+          </div>
+        </div>
+
+        <div class="flex flex-col items-end gap-1 text-xs">
+          <div class="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1">
+            <span
+              id="connection-indicator-mobile"
+              class="material-symbols-outlined text-base text-slate-400"
+            >
+              wifi_off
+            </span>
+            <span id="connection-label-mobile" class="font-medium text-slate-600">
+              Offline
+            </span>
+          </div>
+          <div class="inline-flex items-center gap-1 text-[11px] text-slate-500">
+            <span class="material-symbols-outlined text-base text-amber-500">
+              battery_5_bar
+            </span>
+            <span><span id="battery-percent-mobile">--</span>%</span>
+          </div>
+        </div>
+      </header>
+
+      <!-- Main -->
+      <main class="flex flex-1 flex-col">
+        <!-- Camera block - always visible, top of screen -->
+        <section class="relative w-full bg-black">
+          <div class="relative mx-auto w-full max-w-screen-sm">
+            <div class="relative w-full overflow-hidden bg-black aspect-[4/3]">
+              <img
+                id="video-stream-mobile"
+                src=""
+                alt="Rover camera feed"
+                class="h-full w-full select-none object-cover"
+              />
+
+              <!-- Mode selector overlay -->
+              <div
+                class="absolute top-2 inset-x-0 flex justify-center z-20 pointer-events-auto"
+              >
+                <div
+                  class="inline-flex rounded-full bg-black/55 backdrop-blur px-2 py-1 text-[11px] shadow-soft ring-1 ring-white/10"
+                >
+                  <button
+                    id="mode-active-btn"
+                    type="button"
+                    data-mode-select="ACTIVE"
+                    class="rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-white"
+                  >
+                    Active
+                  </button>
+                  <button
+                    id="mode-eco-btn"
+                    type="button"
+                    data-mode-select="ECO"
+                    class="rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-300"
+                  >
+                    Eco
+                  </button>
+                  <button
+                    id="mode-hd-btn"
+                    type="button"
+                    data-hq-toggle
+                    class="rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-300"
+                  >
+                    HD+
+                  </button>
+                </div>
+              </div>
+
+              <!-- Overlays: crosshair + bottom sensors -->
+              <div class="pointer-events-none absolute inset-0">
+                <!-- Bottom: compact sensor row -->
+                <div
+                  class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent px-3 pb-2 pt-6 overflow-hidden"
+                >
+                  <div
+                    class="flex w-full max-w-full gap-2 overflow-x-auto whitespace-nowrap text-[11px] text-slate-300 scrollbar-thin"
+                  >
+                    <div class="sensor-chip inline-flex items-center gap-1 px-2 py-1">
+                      <span
+                        class="sensor-chip-label text-[10px] uppercase text-slate-500"
+                        >CPU</span
+                      >
+                      <span id="cpu-usage-mobile" class="text-xs font-semibold"
+                        >--%</span
+                      >
+                    </div>
+                    <div class="sensor-chip inline-flex items-center gap-1 px-2 py-1">
+                      <span
+                        class="sensor-chip-label text-[10px] uppercase text-slate-500"
+                        >TEMP</span
+                      >
+                      <span id="cpu-temp-mobile" class="text-xs font-semibold"
+                        >--°C</span
+                      >
+                    </div>
+                    <div class="sensor-chip inline-flex items-center gap-1 px-2 py-1">
+                      <span
+                        class="sensor-chip-label text-[10px] uppercase text-slate-500"
+                        >RAM</span
+                      >
+                      <span id="ram-usage-mobile" class="text-xs font-semibold"
+                        >--%</span
+                      >
+                    </div>
+                    <div class="sensor-chip inline-flex items-center gap-1 px-2 py-1">
+                      <span
+                        class="sensor-chip-label text-[10px] uppercase text-slate-500"
+                        >V</span
+                      >
+                      <span
+                        id="battery-voltage-mobile"
+                        class="text-xs font-semibold"
+                        >-- V</span
+                      >
+                    </div>
+                    <div class="sensor-chip inline-flex items-center gap-1 px-2 py-1">
+                      <span
+                        class="sensor-chip-label text-[10px] uppercase text-slate-500"
+                        >DIST</span
+                      >
+                      <span
+                        id="distance-chip-mobile"
+                        class="text-xs font-semibold"
+                        >-- cm</span
+                      >
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Control dock -->
+        <section
+          class="flex-1 bg-slate-100/80 pb-4 pt-3 [@supports(padding:max(0px))]:pb-[max(1rem,env(safe-area-inset-bottom))]"
+        >
+          <div class="mx-auto flex h-full max-w-screen-sm flex-col gap-3 px-4">
+            <!-- Joystick card -->
+            <div
+              class="flex flex-col items-center rounded-2xl bg-white p-3 shadow-soft"
+            >
+              <div class="mb-2 flex w-full items-center justify-between">
+                <p
+                  class="text-[11px] font-semibold uppercase tracking-wide text-slate-500"
+                >
+                  Drive
+                </p>
+                <p class="text-[11px] text-slate-400">
+                  Speed:
+                  <span id="speed-value-mobile" class="font-semibold">100</span>
+                </p>
+              </div>
+
+              <div class="flex w-full items-center justify-center gap-3">
+                <div
+                  id="joystick-wrapper"
+                  class="flex flex-1 items-center justify-center"
+                >
+                  <div
+                    id="joystick-base"
+                    class="joystick-base relative h-28 w-28 max-w-[32vw] rounded-full bg-slate-100 shadow-inner"
+                  >
+                    <div
+                      id="joystick-knob"
+                      class="joystick-knob absolute left-1/2 top-1/2 h-14 w-14 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary text-white shadow-soft"
+                    >
+                      <div
+                        class="flex h-full w-full items-center justify-center text-xs font-semibold"
+                      >
+                        MOVE
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="flex flex-col items-center gap-1">
+                  <span class="text-[11px] text-slate-500">Speed</span>
+                  <div class="flex h-24 items-center">
+                    <input
+                      id="speed-slider-mobile"
+                      type="range"
+                      min="10"
+                      max="200"
+                      value="100"
+                      class="vertical-range accent-primary"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Quick actions -->
+            <div class="mt-1 grid grid-cols-3 gap-2 text-[10px]">
+              <button
+                type="button"
+                class="flex h-10 flex-col items-center justify-center rounded-2xl bg-white text-slate-700 shadow-soft active:scale-95"
+                data-action="automatic"
+                data-off="automaticOff"
+              >
+                <span
+                  class="material-symbols-outlined mb-0.5 text-base text-primary"
+                >
+                  smart_toy
+                </span>
+                <span class="font-medium uppercase tracking-wide">Auto</span>
+              </button>
+
+              <button
+                type="button"
+                class="flex h-10 flex-col items-center justify-center rounded-2xl bg-white text-slate-700 shadow-soft active:scale-95"
+                data-action="ledOn"
+                data-off="ledOff"
+              >
+                <span
+                  class="material-symbols-outlined mb-0.5 text-base text-amber-500"
+                >
+                  highlight
+                </span>
+                <span class="font-medium uppercase tracking-wide">Head</span>
+              </button>
+
+              <button
+                type="button"
+                class="flex h-10 flex-col items-center justify-center rounded-2xl bg-white text-slate-700 shadow-soft active:scale-95"
+                data-action="wsStripOn"
+                data-off="wsStripOff"
+                data-light="strip"
+              >
+                <span
+                  class="material-symbols-outlined mb-0.5 text-base text-sky-500"
+                >
+                  polyline
+                </span>
+                <span class="font-medium uppercase tracking-wide">Strip</span>
+              </button>
+            </div>
+
+            <!-- Arm & camera panel (always visible, above telemetry) -->
+            <div
+              id="advanced-panel-mobile"
+              class="mt-1 rounded-2xl bg-white p-3 text-[11px] shadow-soft"
+            >
+              <div class="mb-2 flex items-center justify-between">
+                <p
+                  class="text-[11px] font-semibold uppercase tracking-wide text-slate-500"
+                >
+                  Arm &amp; camera
+                </p>
+              </div>
+
+              <div class="grid grid-cols-3 gap-2">
+                <!-- Gripper cluster -->
+                <div
+                  class="flex flex-col items-center rounded-xl border border-slate-200 bg-slate-50/80 px-2 py-2"
+                >
+                  <div
+                    class="mb-1 flex items-center gap-1 text-[10px] font-medium"
+                  >
+                    <span class="material-symbols-outlined text-base">
+                      back_hand
+                    </span>
+                    <span>Gripper</span>
+                  </div>
+                  <div class="flex gap-1">
+                    <button
+                      class="grid h-7 w-7 place-items-center rounded-lg border border-slate-200 bg-white"
+                      data-command="grab"
+                      data-stop="GLstop"
+                    >
+                      <span class="material-symbols-outlined text-base">
+                        north
+                      </span>
+                    </button>
+                    <button
+                      class="grid h-7 w-7 place-items-center rounded-lg border border-slate-200 bg-white"
+                      data-command="loose"
+                      data-stop="GLstop"
+                    >
+                      <span class="material-symbols-outlined text-base">
+                        south
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Shoulder cluster -->
+                <div
+                  class="flex flex-col items-center rounded-xl border border-slate-200 bg-slate-50/80 px-2 py-2"
+                >
+                  <div
+                    class="mb-1 flex items-center gap-1 text-[10px] font-medium"
+                  >
+                    <span class="material-symbols-outlined text-base">north</span>
+                    <span>Shoulder</span>
+                  </div>
+                  <div class="flex gap-1">
+                    <button
+                      class="grid h-7 w-7 place-items-center rounded-lg border border-slate-200 bg-white"
+                      data-command="armUp"
+                      data-stop="armStop"
+                    >
+                      <span class="material-symbols-outlined text-base">
+                        north
+                      </span>
+                    </button>
+                    <button
+                      class="grid h-7 w-7 place-items-center rounded-lg border border-slate-200 bg-white"
+                      data-command="armDown"
+                      data-stop="armStop"
+                    >
+                      <span class="material-symbols-outlined text-base">
+                        south
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Rotate cluster -->
+                <div
+                  class="flex flex-col items-center rounded-xl border border-slate-200 bg-slate-50/80 px-2 py-2"
+                >
+                  <div
+                    class="mb-1 flex items-center gap-1 text-[10px] font-medium"
+                  >
+                    <span class="material-symbols-outlined text-base">
+                      sync_alt
+                    </span>
+                    <span>Rotate</span>
+                  </div>
+                  <div class="flex gap-1">
+                    <button
+                      class="grid h-7 w-7 place-items-center rounded-lg border border-slate-200 bg-white"
+                      data-command="lookleft"
+                      data-stop="LRstop"
+                    >
+                      <span class="material-symbols-outlined text-base">
+                        rotate_left
+                      </span>
+                    </button>
+                    <button
+                      class="grid h-7 w-7 place-items-center rounded-lg border border-slate-200 bg-white"
+                      data-command="lookright"
+                      data-stop="LRstop"
+                    >
+                      <span class="material-symbols-outlined text-base">
+                        rotate_right
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Camera block -->
+              <div
+                class="mt-3 flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2"
+              >
+                <div class="flex items-center gap-2">
+                  <span class="material-symbols-outlined text-base text-slate-500">
+                    videocam
+                  </span>
+                  <span
+                    class="text-[10px] font-medium uppercase tracking-wide text-slate-600"
+                    >Camera tilt</span
+                  >
+                </div>
+                <div class="flex gap-1">
+                  <button
+                    class="grid h-7 w-7 place-items-center rounded-lg border border-slate-200 bg-white"
+                    data-command="up"
+                    data-stop="UDstop"
+                  >
+                    <span class="material-symbols-outlined text-base">
+                      keyboard_arrow_up
+                    </span>
+                  </button>
+                  <button
+                    class="grid h-7 w-7 place-items-center rounded-lg border border-slate-200 bg-white"
+                    data-command="down"
+                    data-stop="UDstop"
+                  >
+                    <span class="material-symbols-outlined text-base">
+                      keyboard_arrow_down
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Telemetry summary card (below arm panel) -->
+            <div class="flex flex-col rounded-2xl bg-white p-3 shadow-soft">
+              <div class="mb-2 flex items-center justify-between">
+                <p
+                  class="text-[11px] font-semibold uppercase tracking-wide text-slate-500"
+                >
+                  Telemetry
+                </p>
+              </div>
+
+              <div class="grid grid-cols-2 gap-2 text-[11px]">
+                <div class="space-y-0.5">
+                  <p class="text-slate-400">Gyro (°/s)</p>
+                  <p class="font-semibold text-slate-700">
+                    X <span id="gyro-x-mobile">--</span>
+                    <span class="text-slate-400">·</span>
+                    Y <span id="gyro-y-mobile">--</span>
+                    <span class="text-slate-400">·</span>
+                    Z <span id="gyro-z-mobile">--</span>
+                  </p>
+                </div>
+                <div class="space-y-0.5">
+                  <p class="text-slate-400">Accel (g)</p>
+                  <p class="font-semibold text-slate-700">
+                    X <span id="accel-x-mobile">--</span>
+                    <span class="text-slate-400">·</span>
+                    Y <span id="accel-y-mobile">--</span>
+                    <span class="text-slate-400">·</span>
+                    Z <span id="accel-z-mobile">--</span>
+                  </p>
+                </div>
+                <div class="space-y-0.5">
+                  <p class="text-slate-400">Ultrasonic</p>
+                  <p class="font-semibold text-slate-700">
+                    <span id="distance-status-label-mobile">Disabled</span>
+                  </p>
+                </div>
+                <div class="space-y-0.5">
+                  <p class="text-slate-400">Battery</p>
+                  <p class="font-semibold text-slate-700">
+                    <span id="battery-percent-telemetry">--</span>%
+                  </p>
+                </div>
+                <div class="space-y-0.5">
+                  <p class="text-slate-400">Distance monitor</p>
+                  <p class="font-semibold text-slate-700">
+                    <span id="distance-monitor-mobile">-- cm</span>
+                  </p>
+                </div>
+                <div class="space-y-0.5">
+                  <p class="text-slate-400">Mode</p>
+                  <p class="font-semibold text-slate-700">
+                    <span id="mode-telemetry-label-mobile">Active</span>
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/js/mobile-ui.js" defer></script>
+  </body>
+</html>
