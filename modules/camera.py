@@ -162,6 +162,8 @@ class CVThread(threading.Thread):
         self.__flag = threading.Event()
         # self.__flag = Event()
         self.__flag.clear()
+        self._running = threading.Event()
+        self._running.set()
 
         self.avg = None
         self.motionCounter = 0
@@ -433,9 +435,15 @@ class CVThread(threading.Thread):
     def resume(self):
         self.__flag.set()
 
+    def stop(self):
+        self._running.clear()
+        self.__flag.set()
+
     def run(self):
-        while 1:
+        while self._running.is_set():
             self.__flag.wait()
+            if not self._running.is_set():
+                break
             if self.CVMode == 'none':
                 continue
             
@@ -540,47 +548,57 @@ class Camera(BaseCamera):
                 raise RuntimeError(f"Picamera2 module unavailable: {exc}") from exc
 
             picam2 = Picamera2()
-            transform = libcamera.Transform(hflip=hflip, vflip=vflip)
-            configs = {}
-            current_config = None
+            try:
+                transform = libcamera.Transform(hflip=hflip, vflip=vflip)
+                configs = {}
+                current_config = None
 
-            def build_config(key):
-                if key in configs:
+                def build_config(key):
+                    if key in configs:
+                        return configs[key]
+                    is_high = key == "high"
+                    resolution = _VIDEO_PROFILES["ACTIVE_HIGH" if is_high else "ACTIVE"]["resolution"]
+                    size = tuple(resolution)
+                    factory = picam2.create_video_configuration if is_high else picam2.create_preview_configuration
+                    configs[key] = factory(
+                        main={"size": size, "format": "RGB888"},
+                        transform=transform,
+                    )
                     return configs[key]
-                is_high = key == "high"
-                resolution = _VIDEO_PROFILES["ACTIVE_HIGH" if is_high else "ACTIVE"]["resolution"]
-                size = tuple(resolution)
-                factory = picam2.create_video_configuration if is_high else picam2.create_preview_configuration
-                configs[key] = factory(
-                    main={"size": size, "format": "RGB888"},
-                    transform=transform,
-                )
-                return configs[key]
 
-            def ensure_profile():
-                nonlocal current_config
-                profile = _get_stream_profile()
-                profile_name = profile.get("name", "ACTIVE").upper()
-                target_key = "high" if profile_name == "ACTIVE_HIGH" else "default"
-                if target_key == current_config:
-                    return
-                config = build_config(target_key)
-                if current_config is not None:
-                    try:
-                        picam2.stop()
-                    except Exception:
-                        pass
-                picam2.configure(config)
-                picam2.start()
-                current_config = target_key
+                def ensure_profile():
+                    nonlocal current_config
+                    profile = _get_stream_profile()
+                    profile_name = profile.get("name", "ACTIVE").upper()
+                    target_key = "high" if profile_name == "ACTIVE_HIGH" else "default"
+                    if target_key == current_config:
+                        return
+                    config = build_config(target_key)
+                    if current_config is not None:
+                        try:
+                            picam2.stop()
+                        except Exception:
+                            pass
+                    picam2.configure(config)
+                    picam2.start()
+                    current_config = target_key
 
-            ensure_profile()
-            print("Using Picamera2 backend for video stream.")
-
-            while True:
                 ensure_profile()
-                img = picam2.capture_array()
-                yield img
+                print("Using Picamera2 backend for video stream.")
+
+                while True:
+                    ensure_profile()
+                    img = picam2.capture_array()
+                    yield img
+            finally:
+                try:
+                    picam2.stop()
+                except Exception:
+                    pass
+                try:
+                    picam2.close()
+                except Exception:
+                    pass
 
         def stream_from_opencv():
             # Allow numeric or explicit device path.
@@ -592,31 +610,37 @@ class Camera(BaseCamera):
             cap = cv2.VideoCapture(source_to_use)
             if not cap.isOpened():
                 raise RuntimeError(f"Unable to open camera device {source_to_use}")
-            current_profile = None
+            try:
+                current_profile = None
 
-            def apply_profile():
-                nonlocal current_profile
-                profile = _get_stream_profile()
-                profile_name = profile.get("name", "ACTIVE").upper()
-                if profile_name == current_profile:
-                    return
-                resolution = tuple(profile.get("resolution") or _VIDEO_PROFILES["ACTIVE"]["resolution"])
-                fps = profile.get("fps") or _VIDEO_PROFILES["ACTIVE"]["fps"]
-                cap.set(cv2.CAP_PROP_FRAME_WIDTH, resolution[0])
-                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, resolution[1])
-                cap.set(cv2.CAP_PROP_FPS, fps)
-                current_profile = profile_name
+                def apply_profile():
+                    nonlocal current_profile
+                    profile = _get_stream_profile()
+                    profile_name = profile.get("name", "ACTIVE").upper()
+                    if profile_name == current_profile:
+                        return
+                    resolution = tuple(profile.get("resolution") or _VIDEO_PROFILES["ACTIVE"]["resolution"])
+                    fps = profile.get("fps") or _VIDEO_PROFILES["ACTIVE"]["fps"]
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, resolution[0])
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, resolution[1])
+                    cap.set(cv2.CAP_PROP_FPS, fps)
+                    current_profile = profile_name
 
-            apply_profile()
-            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
-            print(f"Using OpenCV backend for video stream on {source_to_use}.")
-            while True:
                 apply_profile()
-                ret, frame = cap.read()
-                if not ret:
-                    time.sleep(0.05)
-                    continue
-                yield frame
+                cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+                print(f"Using OpenCV backend for video stream on {source_to_use}.")
+                while True:
+                    apply_profile()
+                    ret, frame = cap.read()
+                    if not ret:
+                        time.sleep(0.05)
+                        continue
+                    yield frame
+            finally:
+                try:
+                    cap.release()
+                except Exception:
+                    pass
 
         generators = []
         if backend_choice in ("picamera2", "auto"):
@@ -641,56 +665,60 @@ class Camera(BaseCamera):
 
         active_name, active_gen = generators[0]
 
-        while True:
-            try:
-                img = next(active_gen)
-            except StopIteration:
-                raise RuntimeError(f"Camera backend {active_name} exhausted")
-            except Exception as exc:
-                print(f"Camera backend {active_name} failed: {exc}")
-                generators.pop(0)
-                if not generators:
-                    raise
-                active_name, active_gen = generators[0]
-                continue
-            start_time = time.time()
-
-            if img is None:
-                if ImgIsNone == 0:
-                    print("--------------------")
-                    print("\033[33mwarning: Camera module not connected or returning no frames.\033[0m")
-                    print("\033[31merror: Unable to read camera data.\033[0m")
-                    print("\033[33mIt may be that the Legacy camera is not turned on or the camera is not connected correctly.\033[0m")
-                    print("Open the Legacy camera: Enter in Raspberry Pi\033[34m'sudo raspi-config'\033[0m -->Select\033[34m'3 Interface Options'\033[0m -->\033[34m'I1 Legacy Camera'\033[0m.")
-                    print("Use the command: \033[34m'sudo killall python3'\033[0m. Close the self-starting program webServer.py")
-                    print("Use the command: \033[34m'raspistill -t 1000 -o image.jpg'\033[0m to check whether the camera can be used correctly.")
-                    print("Press the keyboard keys \033[34m'Ctrl + C'\033[0m multiple times to exit the current program.")
-                    print("--------Ctrl+C quit-----------")
-                    ImgIsNone = 1
-                continue
-
-            if Camera.modeSelect == 'none':
-                # switch.switch(1,0)
-                cvt.pause()
-            else:
-                if cvt.CVThreading:
-                    pass
-                else:
-                    pass
-                    cvt.mode(Camera.modeSelect, img)
-                    cvt.resume()
+        try:
+            while True:
                 try:
-                    pass
-                    img = cvt.elementDraw(img)
-                except:
-                    pass
-            
-            img, profile_delay = _transform_frame_for_profile(img)
-            encoded = cv2.imencode('.jpg', img)
-            if encoded[0]:
-                yield encoded[1].tobytes()
-            if profile_delay:
-                remaining = profile_delay - (time.time() - start_time)
-                if remaining > 0:
-                    time.sleep(remaining)
+                    img = next(active_gen)
+                except StopIteration:
+                    raise RuntimeError(f"Camera backend {active_name} exhausted")
+                except Exception as exc:
+                    print(f"Camera backend {active_name} failed: {exc}")
+                    generators.pop(0)
+                    if not generators:
+                        raise
+                    active_name, active_gen = generators[0]
+                    continue
+                start_time = time.time()
+
+                if img is None:
+                    if ImgIsNone == 0:
+                        print("--------------------")
+                        print("\033[33mwarning: Camera module not connected or returning no frames.\033[0m")
+                        print("\033[31merror: Unable to read camera data.\033[0m")
+                        print("\033[33mIt may be that the Legacy camera is not turned on or the camera is not connected correctly.\033[0m")
+                        print("Open the Legacy camera: Enter in Raspberry Pi\033[34m'sudo raspi-config'\033[0m -->Select\033[34m'3 Interface Options'\033[0m -->\033[34m'I1 Legacy Camera'\033[0m.")
+                        print("Use the command: \033[34m'sudo killall python3'\033[0m. Close the self-starting program webServer.py")
+                        print("Use the command: \033[34m'raspistill -t 1000 -o image.jpg'\033[0m to check whether the camera can be used correctly.")
+                        print("Press the keyboard keys \033[34m'Ctrl + C'\033[0m multiple times to exit the current program.")
+                        print("--------Ctrl+C quit-----------")
+                        ImgIsNone = 1
+                    continue
+
+                if Camera.modeSelect == 'none':
+                    # switch.switch(1,0)
+                    cvt.pause()
+                else:
+                    if cvt.CVThreading:
+                        pass
+                    else:
+                        pass
+                        cvt.mode(Camera.modeSelect, img)
+                        cvt.resume()
+                    try:
+                        pass
+                        img = cvt.elementDraw(img)
+                    except:
+                        pass
+                
+                img, profile_delay = _transform_frame_for_profile(img)
+                encoded = cv2.imencode('.jpg', img)
+                if encoded[0]:
+                    yield encoded[1].tobytes()
+                if profile_delay:
+                    remaining = profile_delay - (time.time() - start_time)
+                    if remaining > 0:
+                        time.sleep(remaining)
+        finally:
+            cvt.stop()
+            cvt.join(timeout=1.0)
             

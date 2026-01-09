@@ -1,3 +1,4 @@
+import os
 import time
 import threading
 import cv2
@@ -51,28 +52,31 @@ class CameraEvent(object):
         """Invoked from each client's thread after a frame was processed."""
         self.events[get_ident()][0].clear()
 
+def _read_env_float(name, default):
+    value = os.getenv(name)
+    if value is None or value == "":
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
+
 
 class BaseCamera(object):
     thread = None  # background thread that reads frames from camera
     frame = None  # current frame is stored here by background thread
     last_access = 0  # time of last client access to the camera
     event = CameraEvent()
+    thread_lock = threading.Lock()
+    idle_timeout = max(0.0, _read_env_float("CAMERA_IDLE_TIMEOUT", 5.0))
 
     def __init__(self):
-        """Start the background camera thread if it isn't running yet."""
-        if BaseCamera.thread is None:
-            BaseCamera.last_access = time.time()
-
-            # start background frame thread
-            BaseCamera.thread = threading.Thread(target=self._thread)
-            BaseCamera.thread.start()
-
-            # wait until frames are available
-            while self.get_frame() is None:
-                time.sleep(0)
+        """Camera threads are started lazily on first access."""
+        pass
 
     def get_frame(self):
         """Return the current camera frame."""
+        type(self)._ensure_thread()
         BaseCamera.last_access = time.time()
 
         # wait for a signal from the camera thread
@@ -95,11 +99,27 @@ class BaseCamera(object):
             BaseCamera.frame = frame
             BaseCamera.event.set()  # send signal to clients
             time.sleep(0)
-
-            # if there hasn't been any clients asking for frames in
-            # the last 10 seconds then stop the thread
-            # if time.time() - BaseCamera.last_access > 10:
-            #     frames_iterator.close()
-            #     print('Stopping camera thread due to inactivity.')
-            #     break
+            if cls.idle_timeout > 0 and time.time() - BaseCamera.last_access > cls.idle_timeout:
+                try:
+                    frames_iterator.close()
+                except Exception:
+                    pass
+                print('Stopping camera thread due to inactivity.')
+                break
         BaseCamera.thread = None
+        BaseCamera.frame = None
+        try:
+            BaseCamera.event.events.clear()
+        except Exception:
+            pass
+
+    @classmethod
+    def _ensure_thread(cls):
+        if BaseCamera.thread is not None:
+            return
+        with BaseCamera.thread_lock:
+            if BaseCamera.thread is not None:
+                return
+            BaseCamera.last_access = time.time()
+            BaseCamera.thread = threading.Thread(target=cls._thread)
+            BaseCamera.thread.start()

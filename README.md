@@ -105,6 +105,7 @@ This repository hosts the control software for the RaspTank2 tracked rover: Web 
 | `MOTOR_RAMP_HZ` | `50` | Update rate for the motor ramp loop (Hz). |
 | `SERVO_STEP_<JOINT>` | `1` | Initial per-servo incremental steps (`SHOULDER`, `WRIST`, `ROTATE`, `GRIPPER`, `CAMERA`). Adjust live from the Arm & Gripper gear menu; overrides persist in `modules/servo_steps.json`. |
 | `CAMERA_BACKEND` | `auto` | `picamera2`, `opencv`, or `mock` selection. |
+| `CAMERA_IDLE_TIMEOUT` | `5` | Seconds to keep the camera active after the last client disconnects. |
 | `DISTANCE_POLL_ACTIVE` | `0.2` | Ultrasonic poll interval in ACTIVE mode (seconds). |
 | `DISTANCE_POLL_STANDBY` | `1.5` | Ultrasonic poll interval in STANDBY mode (seconds). |
 | `DISTANCE_POLL_ECO` | `3.0` | Ultrasonic poll interval in ECO mode (seconds). |
@@ -114,6 +115,7 @@ This repository hosts the control software for the RaspTank2 tracked rover: Web 
 | `BATTERY_VOLT_MIN` | `6.0` | Voltage mapped to 0% for the battery gauge. |
 | `BATTERY_VOLT_MAX` | `8.4` | Voltage mapped to 100% (2S Li-ion). |
 | `BATTERY_ADC_CHANNEL` | `0` | ADS7830 channel wired to the battery divider. |
+| `BATTERY_CAL_FILE` | `modules/battery_calibration.json` | Path to persistent battery calibration storage. |
 | `BATTERY_CAL_FACTOR` / `BATTERY_CAL_OFFSET` | `1.0` / `0.0` | Manual overrides for calibration math. |
 | `WS2812_DRIVER` | `auto` | `spi` (new SPI bitstream driver), `pwm` (legacy RobotWS2812), or auto-detect fallback. |
 | `WS2812_LED_COUNT` | `16` | Total number of WS2812 pixels (built-in + external strip). |

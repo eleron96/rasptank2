@@ -23,12 +23,14 @@ services:
       - /sys/firmware/devicetree/base:/sys/firmware/devicetree/base:ro
       - /boot:/boot:ro
       - /run/udev:/run/udev:ro
+      - ./data:/data
     environment:
       PCA9685_ADDR: "0x5f"
       BLINKA_FORCECHIP: "BCM2XXX"
       BLINKA_FORCEBOARD: "RASPBERRY_PI_5"
       SERVO_RELAX: "1"
       CAMERA_BACKEND: "auto"
+      BATTERY_CAL_FILE: "/data/battery_calibration.json"
 
   nginx:
     image: nginx:stable
