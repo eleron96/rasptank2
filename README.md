@@ -100,8 +100,17 @@ This repository hosts the control software for the RaspTank2 tracked rover: Web 
 | `PWM_LED_FREQ` | `50` | PWM frequency for the LED helper. |
 | `SERVO_RELAX` | `1` | Release torque automatically when servos idle (`0` keeps holding torque). |
 | `ARM_SERVO_SPEED` | `10` | Default shoulder servo travel speed (1-10). |
+| `MOTOR_RAMP_ENABLE` | `1` | Enable smooth start/stop for the drive motors. |
+| `MOTOR_ACCEL_LIMIT` | `200` | Max speed change per second (0-100 scale). |
+| `MOTOR_RAMP_HZ` | `50` | Update rate for the motor ramp loop (Hz). |
 | `SERVO_STEP_<JOINT>` | `1` | Initial per-servo incremental steps (`SHOULDER`, `WRIST`, `ROTATE`, `GRIPPER`, `CAMERA`). Adjust live from the Arm & Gripper gear menu; overrides persist in `modules/servo_steps.json`. |
 | `CAMERA_BACKEND` | `auto` | `picamera2`, `opencv`, or `mock` selection. |
+| `DISTANCE_POLL_ACTIVE` | `0.2` | Ultrasonic poll interval in ACTIVE mode (seconds). |
+| `DISTANCE_POLL_STANDBY` | `1.5` | Ultrasonic poll interval in STANDBY mode (seconds). |
+| `DISTANCE_POLL_ECO` | `3.0` | Ultrasonic poll interval in ECO mode (seconds). |
+| `LINE_POLL_INTERVAL` | `0.2` | Line sensor poll interval in track-line mode (seconds). |
+| `KEEP_DISTANCE_INTERVAL` | `0.2` | Ultrasonic poll interval for keep-distance mode (seconds). |
+| `BATTERY_POLL_INTERVAL` | `10` | Battery monitor update interval (seconds). |
 | `BATTERY_VOLT_MIN` | `6.0` | Voltage mapped to 0% for the battery gauge. |
 | `BATTERY_VOLT_MAX` | `8.4` | Voltage mapped to 100% (2S Li-ion). |
 | `BATTERY_ADC_CHANNEL` | `0` | ADS7830 channel wired to the battery divider. |

@@ -3,6 +3,7 @@
 # Description : Control Functions
 # Author	  : Adeept
 # Date		: 2024/03/10
+import os
 import time
 import threading
 from gpiozero import InputDevice
@@ -25,6 +26,23 @@ move.setup()
 line_pin_left = 22
 line_pin_middle = 27
 line_pin_right = 17
+
+
+def _read_interval_env(name, default):
+	raw = os.getenv(name)
+	if not raw:
+		return default
+	try:
+		value = float(raw)
+	except ValueError:
+		return default
+	if value <= 0:
+		return default
+	return value
+
+
+_LINE_POLL_INTERVAL = _read_interval_env("LINE_POLL_INTERVAL", 0.2)
+_KEEP_DISTANCE_INTERVAL = _read_interval_env("KEEP_DISTANCE_INTERVAL", 0.2)
 
 
 
@@ -99,7 +117,7 @@ class Functions(threading.Thread):
 			move.trackingMove(TL_Speed,1,"right")
 		else:
 			move.trackingMove(TL_Speed,1,"no")
-		time.sleep(0.1)
+		time.sleep(_LINE_POLL_INTERVAL)
 
 
 	
@@ -164,6 +182,7 @@ class Functions(threading.Thread):
 		distanceGet = ultra.checkdist()
 		if distanceGet is None:
 			move.motorStop()
+			time.sleep(_KEEP_DISTANCE_INTERVAL)
 			return
 		if distanceGet > (self.rangeKeep/2+0.1):
 			move.move(KD_Speed, 1, "mid")
@@ -171,6 +190,7 @@ class Functions(threading.Thread):
 			move.move(KD_Speed, -1, "mid")
 		else:
 			move.motorStop()
+		time.sleep(_KEEP_DISTANCE_INTERVAL)
 
 
 	def functionGoing(self):

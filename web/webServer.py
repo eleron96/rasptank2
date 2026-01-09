@@ -53,11 +53,23 @@ LVC_UPPER_V = float(os.getenv("SHOULDER_LVC_UPPER", "6.2"))
 LVC_EMA_ALPHA = float(os.getenv("SHOULDER_LVC_ALPHA", "0.2"))
 logger = logging.getLogger("rasptank")
 
+def _read_env_float(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if value is None or value == "":
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
+
 _distance_lock = threading.Lock()
 _distance_state = {"value": None, "timestamp": 0.0}
 _distance_event_lock = threading.Lock()
 _distance_event_state = {"value": None, "timestamp": 0.0, "status": None}
 _DISTANCE_IDLE_TIMEOUT = float(os.getenv("DISTANCE_IDLE_TIMEOUT", "60"))
+_DISTANCE_POLL_ACTIVE = max(0.05, _read_env_float("DISTANCE_POLL_ACTIVE", 0.2))
+_DISTANCE_POLL_STANDBY = max(0.1, _read_env_float("DISTANCE_POLL_STANDBY", 1.5))
+_DISTANCE_POLL_ECO = max(0.2, _read_env_float("DISTANCE_POLL_ECO", 3.0))
 _distance_monitor_lock = threading.Lock()
 _distance_monitor_state = {
     "enabled": True,
@@ -117,7 +129,6 @@ T_sc.start()
 H1_sc = RPIservo.ServoCtrl()
 H1_sc.start()
 H1_sc.set_direction(0, -1)
-H1_sc.set_relax_enabled(SHOULDER_SERVO_CHANNEL, False)
 
 H2_sc = RPIservo.ServoCtrl()
 H2_sc.start()
@@ -332,22 +343,23 @@ def _maybe_pause_distance_monitor(now: float) -> bool:
     return True
 
 
-def _distance_worker(poll_interval: float = 0.1) -> None:
+def _distance_worker(poll_interval: Optional[float] = None) -> None:
     while True:
+        sleep_interval = poll_interval if poll_interval is not None else _get_distance_sleep_interval()
         try:
             snapshot = _distance_monitor_snapshot()
             status = _distance_monitor_status(snapshot)
             if status == "disabled":
-                time.sleep(poll_interval)
+                time.sleep(sleep_interval)
                 continue
             now = time.time()
             if status == "active" and _maybe_pause_distance_monitor(now):
-                time.sleep(poll_interval)
+                time.sleep(sleep_interval)
                 continue
             snapshot = _distance_monitor_snapshot()
             status = _distance_monitor_status(snapshot)
             if status != "active":
-                time.sleep(poll_interval)
+                time.sleep(sleep_interval)
                 continue
             measurement = ultra.checkdist()
             if measurement is not None and math.isfinite(measurement):
@@ -361,15 +373,15 @@ def _distance_worker(poll_interval: float = 0.1) -> None:
                 _broadcast_distance_update(None)
         except Exception as exc:
             logger.debug({"evt": "ultrasonic_read_error", "error": str(exc)})
-        time.sleep(_get_distance_sleep_interval())
+        time.sleep(sleep_interval)
 
 
 def _get_distance_sleep_interval() -> float:
     if _system_mode == "ECO":
-        return 2.0
+        return _DISTANCE_POLL_ECO
     if _system_mode == "STANDBY":
-        return 1.0
-    return 0.1
+        return _DISTANCE_POLL_STANDBY
+    return _DISTANCE_POLL_ACTIVE
 
 
 def _distance_motion_listener() -> None:

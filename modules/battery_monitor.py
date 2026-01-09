@@ -127,6 +127,9 @@ _CHARGE_WINDOW_S = max(
 _CHARGE_DELTA_V = max(
     0.0, _safe_float(os.getenv("BATTERY_CHARGE_DELTA_V", "0.03"), 0.03)
 )
+_BATTERY_POLL_INTERVAL = max(
+    0.2, _safe_float(os.getenv("BATTERY_POLL_INTERVAL", "10"), 10.0)
+)
 
 _DEFAULT_CAL = {
     "scale": _VOLT_SCALE,
@@ -312,9 +315,13 @@ def _to_percentage(voltage: float) -> int:
     return max(0, min(100, int(round(pct))))
 
 class BatteryMonitor(threading.Thread):
-    def __init__(self, interval: float = 5.0):
+    def __init__(self, interval: float = _BATTERY_POLL_INTERVAL):
         super().__init__(daemon=True)
-        self._interval = interval
+        try:
+            interval_value = float(interval)
+        except (TypeError, ValueError):
+            interval_value = _BATTERY_POLL_INTERVAL
+        self._interval = max(0.2, interval_value)
         self._voltage = 0.0
         self._percentage = 0
         self._charging = None
