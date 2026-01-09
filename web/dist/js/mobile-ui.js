@@ -4,9 +4,11 @@
     connectionIndicator: document.getElementById('connection-indicator-mobile'),
     connectionLabel: document.getElementById('connection-label-mobile'),
     batteryPercentHeader: document.getElementById('battery-percent-mobile'),
+    batteryChargeStateHeader: document.getElementById('battery-charge-state-mobile'),
     batteryVoltageChip: document.getElementById('battery-voltage-mobile'),
     batteryPercentChip: document.getElementById('battery-percent-chip'),
     batteryPercentTelemetry: document.getElementById('battery-percent-telemetry'),
+    batteryChargeStateTelemetry: document.getElementById('battery-charge-state-telemetry'),
     cpuUsage: document.getElementById('cpu-usage-mobile'),
     cpuTemp: document.getElementById('cpu-temp-mobile'),
     ramUsage: document.getElementById('ram-usage-mobile'),
@@ -152,7 +154,7 @@
     setText(els.distanceStatusLabel, formatDistanceStatus(status));
   }
 
-  function applyBattery (voltage, percentage) {
+  function applyBattery (voltage, percentage, charging) {
     const smoothed = smoothVoltage(voltage);
     const percent = Number.isFinite(percentage) ? percentage : voltageToPercent(smoothed);
     setText(els.batteryVoltageChip, smoothed != null ? `${smoothed.toFixed(2)} V` : '-- V');
@@ -166,6 +168,9 @@
       setText(els.batteryPercentChip, '--%');
       setText(els.batteryPercentTelemetry, '--');
     }
+    const chargeLabel = charging === true ? 'Charging' : (charging === false ? 'Idle' : '--');
+    setText(els.batteryChargeStateHeader, chargeLabel);
+    setText(els.batteryChargeStateTelemetry, chargeLabel);
   }
 
   function applyMode (mode, fromServer = false) {
@@ -238,7 +243,8 @@
       parseNumber(data[4])
     ];
     const percentage = percentCandidates.find((val) => Number.isFinite(val));
-    applyBattery(voltage, percentage);
+    const charging = typeof battery.charging === 'boolean' ? battery.charging : null;
+    applyBattery(voltage, percentage, charging);
 
     setText(els.gyro.x, gyro.x ?? data[5] ?? '--');
     setText(els.gyro.y, gyro.y ?? data[6] ?? '--');
@@ -498,7 +504,7 @@
           ...data.calibration
         };
       }
-      applyBattery(data?.voltage, data?.calibration ? undefined : null);
+      applyBattery(data?.voltage, data?.calibration ? undefined : null, null);
     } catch (err) {
       console.warn('Calibration fetch failed', err);
     }
@@ -524,7 +530,7 @@
       source.addEventListener('battery_status', (event) => {
         try {
           const payload = JSON.parse(event.data || '{}');
-          applyBattery(payload.voltage ?? payload.raw_voltage, payload.percentage);
+          applyBattery(payload.voltage ?? payload.raw_voltage, payload.percentage, payload.charging);
         } catch (err) {
           console.warn('battery_status parse failed', err);
         }

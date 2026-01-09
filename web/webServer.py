@@ -1196,6 +1196,7 @@ async def recv_msg(websocket):
                 percentage_str = 'N/A'
                 voltage_num = None
                 percentage_num = None
+                charging_value = None
                 distance_cm = None
                 distance_display = "--"
                 distance_status = _distance_monitor_status()
@@ -1213,6 +1214,7 @@ async def recv_msg(websocket):
                         if percentage_value is not None:
                             percentage_num = float(percentage_value)
                             percentage_str = f"{int(round(percentage_num))}"
+                        charging_value = battery.read_charging()
                     except Exception as exc:
                         logger.warning({"evt": "battery_read_error", "error": str(exc)})
                 if distance_cm is None and distance_status == "active":
@@ -1274,6 +1276,7 @@ async def recv_msg(websocket):
                     "voltage_display": voltage_str,
                     "percentage": percentage_num,
                     "percentage_display": percentage_str,
+                    "charging": charging_value,
                 }
                 response['accel'] = {
                     "x": accel_values[0],

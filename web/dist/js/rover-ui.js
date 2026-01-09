@@ -7,6 +7,7 @@
     reconnectButton: document.getElementById('reconnect-button'),
     batteryPercent: document.getElementById('battery-percent'),
     batteryVoltage: document.getElementById('battery-voltage'),
+    batteryChargeState: document.getElementById('battery-charge-state'),
     cpuUsage: document.getElementById('cpu-usage'),
     cpuTemp: document.getElementById('cpu-temp'),
     ramUsage: document.getElementById('ram-usage'),
@@ -1048,6 +1049,15 @@
         elements.batteryPercent.textContent = battery.percentage_display;
       } else {
         elements.batteryPercent.textContent = '--';
+      }
+    }
+    if (elements.batteryChargeState) {
+      if (battery.charging === true) {
+        elements.batteryChargeState.textContent = 'Charging';
+      } else if (battery.charging === false) {
+        elements.batteryChargeState.textContent = 'Idle';
+      } else {
+        elements.batteryChargeState.textContent = '--';
       }
     }
 

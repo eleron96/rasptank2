@@ -7,8 +7,53 @@ import time
 import weakref
 from pathlib import Path
 import logging
+from collections import deque
 
 from math import isclose
+
+def _safe_int(value: str, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_float(value: str, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalize_soc_mode(value: str) -> str:
+    value = (value or "").strip().lower()
+    return "curve" if value == "curve" else "linear"
+
+
+def _normalize_soc_curve(data) -> list:
+    if not data:
+        return []
+    cleaned = []
+    for point in data:
+        if not isinstance(point, (list, tuple)) or len(point) < 2:
+            continue
+        try:
+            voltage = float(point[0])
+            pct = float(point[1])
+        except (TypeError, ValueError):
+            continue
+        cleaned.append((voltage, pct))
+    cleaned.sort(key=lambda item: item[0])
+    return cleaned
+
+
+def _parse_soc_curve_env(raw: str) -> list:
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return []
+    return _normalize_soc_curve(data)
+
 
 try:
     import board  # type: ignore
@@ -48,12 +93,52 @@ _VOLT_SCALE = float(os.getenv("BATTERY_VOLT_SCALE", str(_MAX_VOLT)))
 _CAL_FACTOR = float(os.getenv("BATTERY_CAL_FACTOR", "1.0"))
 _CAL_OFFSET = float(os.getenv("BATTERY_CAL_OFFSET", "0.0"))
 
+_DEFAULT_SOC_CURVE = [
+    [3.30, 0],
+    [3.52, 10],
+    [3.61, 20],
+    [3.69, 30],
+    [3.74, 40],
+    [3.80, 50],
+    [3.87, 60],
+    [3.95, 70],
+    [4.03, 80],
+    [4.11, 90],
+    [4.20, 100],
+]
+
+_SOC_MODE = _normalize_soc_mode(os.getenv("BATTERY_SOC_MODE", "linear"))
+_CELL_COUNT = max(1, _safe_int(os.getenv("BATTERY_CELL_COUNT", "2"), 2))
+_PARALLEL_COUNT = max(1, _safe_int(os.getenv("BATTERY_PARALLEL_COUNT", "1"), 1))
+_CELL_CAPACITY_MAH = max(
+    0.0, _safe_float(os.getenv("BATTERY_CELL_CAPACITY_MAH", "3500"), 3500.0)
+)
+
+_SOC_CURVE = _normalize_soc_curve(_DEFAULT_SOC_CURVE)
+_curve_env = os.getenv("BATTERY_SOC_CURVE", "").strip()
+if _curve_env:
+    _parsed = _parse_soc_curve_env(_curve_env)
+    if _parsed:
+        _SOC_CURVE = _parsed
+
+_CHARGE_WINDOW_S = max(
+    10.0, _safe_float(os.getenv("BATTERY_CHARGE_WINDOW_S", "90"), 90.0)
+)
+_CHARGE_DELTA_V = max(
+    0.0, _safe_float(os.getenv("BATTERY_CHARGE_DELTA_V", "0.03"), 0.03)
+)
+
 _DEFAULT_CAL = {
     "scale": _VOLT_SCALE,
     "factor": _CAL_FACTOR,
     "offset": _CAL_OFFSET,
     "min_voltage": _MIN_VOLT,
     "max_voltage": _MAX_VOLT,
+    "soc_mode": _SOC_MODE,
+    "cell_count": _CELL_COUNT,
+    "parallel_count": _PARALLEL_COUNT,
+    "cell_capacity_mah": _CELL_CAPACITY_MAH,
+    "soc_curve": _SOC_CURVE,
 }
 _CAL_LOCK = threading.Lock()
 # Track live monitor instances so calibration changes propagate immediately.
@@ -76,6 +161,7 @@ def _save_calibration(data: dict) -> None:
 
 def _load_calibration() -> None:
     global _VOLT_SCALE, _CAL_FACTOR, _CAL_OFFSET, _MIN_VOLT, _MAX_VOLT
+    global _SOC_MODE, _CELL_COUNT, _PARALLEL_COUNT, _CELL_CAPACITY_MAH, _SOC_CURVE
     if not _CAL_FILE.is_file():
         _save_calibration(_DEFAULT_CAL)
         return
@@ -91,6 +177,20 @@ def _load_calibration() -> None:
             _MIN_VOLT = float(data["min_voltage"])
         if "max_voltage" in data:
             _MAX_VOLT = float(data["max_voltage"])
+        if "soc_mode" in data:
+            _SOC_MODE = _normalize_soc_mode(data["soc_mode"])
+        if "cell_count" in data:
+            _CELL_COUNT = max(1, _safe_int(data["cell_count"], _CELL_COUNT))
+        if "parallel_count" in data:
+            _PARALLEL_COUNT = max(1, _safe_int(data["parallel_count"], _PARALLEL_COUNT))
+        if "cell_capacity_mah" in data:
+            _CELL_CAPACITY_MAH = max(
+                0.0, _safe_float(data["cell_capacity_mah"], _CELL_CAPACITY_MAH)
+            )
+        if "soc_curve" in data:
+            normalized = _normalize_soc_curve(data["soc_curve"])
+            if normalized:
+                _SOC_CURVE = normalized
     except Exception as exc:
         logger.error({"evt": "battery_calibration_load_error", "error": str(exc)})
 
@@ -105,7 +205,18 @@ def get_calibration() -> dict:
         "offset": _CAL_OFFSET,
         "min_voltage": _MIN_VOLT,
         "max_voltage": _MAX_VOLT,
+        "soc_mode": _SOC_MODE,
+        "cell_count": _CELL_COUNT,
+        "parallel_count": _PARALLEL_COUNT,
+        "cell_capacity_mah": _CELL_CAPACITY_MAH,
+        "soc_curve": _SOC_CURVE,
     }
+
+
+def _pack_capacity_mah() -> float:
+    if _CELL_CAPACITY_MAH <= 0:
+        return 0.0
+    return float(_CELL_CAPACITY_MAH) * max(1, _PARALLEL_COUNT)
 
 
 def _apply_calibration_to_all(scale: float, factor: float, offset: float) -> dict:
@@ -171,7 +282,30 @@ def calibrate_to_voltage(actual_voltage: float, samples: int = 20, delay: float 
             monitor.close()
 
 
+def _soc_from_curve(voltage: float, curve: list) -> float:
+    if not curve:
+        return 0.0
+    if voltage <= curve[0][0]:
+        return curve[0][1]
+    if voltage >= curve[-1][0]:
+        return curve[-1][1]
+    for idx in range(1, len(curve)):
+        low_v, low_p = curve[idx - 1]
+        high_v, high_p = curve[idx]
+        if voltage <= high_v:
+            if isclose(high_v, low_v):
+                return high_p
+            ratio = (voltage - low_v) / (high_v - low_v)
+            return low_p + (high_p - low_p) * ratio
+    return curve[-1][1]
+
+
 def _to_percentage(voltage: float) -> int:
+    if _SOC_MODE == "curve" and _SOC_CURVE:
+        cell_count = max(1, _CELL_COUNT)
+        per_cell = voltage / cell_count
+        pct = _soc_from_curve(per_cell, _SOC_CURVE)
+        return max(0, min(100, int(round(pct))))
     if isclose(_MAX_VOLT, _MIN_VOLT):
         return 0
     pct = (voltage - _MIN_VOLT) / (_MAX_VOLT - _MIN_VOLT) * 100.0
@@ -183,6 +317,7 @@ class BatteryMonitor(threading.Thread):
         self._interval = interval
         self._voltage = 0.0
         self._percentage = 0
+        self._charging = None
         self._lock = threading.Lock()
         self._running = threading.Event()
         self._running.set()
@@ -195,6 +330,7 @@ class BatteryMonitor(threading.Thread):
         self._cal_factor = _CAL_FACTOR
         self._cal_offset = _CAL_OFFSET
         self._last_raw = 0.0
+        self._charge_samples = deque()
         self._setup()
         _ACTIVE_MONITORS.add(self)
 
@@ -241,6 +377,10 @@ class BatteryMonitor(threading.Thread):
     def read_percentage(self) -> int:
         with self._lock:
             return self._percentage
+
+    def read_charging(self):
+        with self._lock:
+            return self._charging
 
     def _read_channel(self) -> int:
         if self._analog_channel is not None:
@@ -297,17 +437,39 @@ class BatteryMonitor(threading.Thread):
         voltage = round(voltage, 2)
         raw_voltage = round(self._raw_to_voltage(raw, calibrated=False), 2)
         percentage = _to_percentage(voltage)
+        charging = self._charging
+        if _CHARGE_WINDOW_S > 0 and _CHARGE_DELTA_V > 0:
+            now = time.time()
+            samples = self._charge_samples
+            samples.append((now, voltage))
+            cutoff = now - _CHARGE_WINDOW_S
+            while samples and samples[0][0] < cutoff:
+                samples.popleft()
+            if len(samples) >= 2:
+                dt = now - samples[0][0]
+                if dt >= max(10.0, _CHARGE_WINDOW_S * 0.5):
+                    delta = voltage - samples[0][1]
+                    if delta >= _CHARGE_DELTA_V:
+                        charging = True
+                    elif delta <= -_CHARGE_DELTA_V:
+                        charging = False
+        capacity_mah = _pack_capacity_mah()
+        remaining_mah = None
+        if capacity_mah > 0:
+            remaining_mah = int(round(capacity_mah * (percentage / 100.0)))
         changed = False
         with self._lock:
             if (
                 not isclose(self._voltage, voltage, abs_tol=0.01)
                 or not isclose(getattr(self, "_last_raw", raw_voltage), raw_voltage, abs_tol=0.01)
                 or self._percentage != percentage
+                or self._charging != charging
             ):
                 changed = True
             self._voltage = voltage
             self._percentage = percentage
             self._last_raw = raw_voltage
+            self._charging = charging
         if changed and event_bus:
             event_bus.publish(
                 "battery_status",
@@ -315,6 +477,9 @@ class BatteryMonitor(threading.Thread):
                     "voltage": voltage,
                     "raw_voltage": raw_voltage,
                     "percentage": percentage,
+                    "charging": charging,
+                    "capacity_mah": int(round(capacity_mah)) if capacity_mah > 0 else None,
+                    "remaining_mah": remaining_mah,
                 },
             )
 
